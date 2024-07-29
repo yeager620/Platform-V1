@@ -94,9 +94,3 @@ class SportsbookReviewScraper:
             all_records.extend(records)
         return pd.DataFrame(all_records)
 
-
-if __name__ == "__main__":
-    scraper = SportsbookReviewScraper(start_date="2023-06-10", end_date="2023-06-15")
-    df = scraper.scrape()
-    print(df.head())
-    df.to_csv("sportsbook_data.csv", index=False)
