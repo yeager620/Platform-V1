@@ -51,8 +51,8 @@ class SportsbookReviewScraper:
                         team_2_odds = odds_lines[1].find_all('span', class_='fs-9')[-1].text.strip()
 
                         # Extracting opener (if available)
-                        opener_tag = sportsbook.find_previous('span', class_='opener')
-                        opener = opener_tag.text.strip() if opener_tag else None
+                        # opener_tag = sportsbook.find_previous('span', class_='opener')
+                        # opener = opener_tag.text.strip() if opener_tag else None
 
                         # Record for team 1
                         record_team_1 = {
@@ -62,7 +62,6 @@ class SportsbookReviewScraper:
                             'sportsbook': sportsbook_name,
                             'odds': team_1_odds,
                             'wager_percentage': team_1_wager,
-                            'opener': opener,
                             'game_time': game_time,
                             'game_url': game_url
                         }
@@ -76,7 +75,6 @@ class SportsbookReviewScraper:
                             'sportsbook': sportsbook_name,
                             'odds': team_2_odds,
                             'wager_percentage': team_2_wager,
-                            'opener': opener,
                             'game_time': game_time,
                             'game_url': game_url
                         }

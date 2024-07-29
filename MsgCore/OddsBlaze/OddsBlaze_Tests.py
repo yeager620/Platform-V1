@@ -8,6 +8,7 @@ from OddsBlaze import OddsBlazeAPI
 app = FastAPI()
 odds_blaze = OddsBlazeAPI()
 
+
 async def main():
     pd.set_option('display.max_colwidth', None)
     data = await odds_blaze.get_odds(league="mlb", market="mlb:moneyline")
