@@ -1,8 +1,9 @@
 import asyncio
-from datetime import datetime
-
+from datetime import datetime, timedelta
 import pandas as pd
 from OddsBlaze import OddsBlazeAPI
+from BaseballSavant.bs_hist_gamelogs import bs_hist_gamelogs
+from BaseballSavant.bs_range_gamelogs import bs_range_gamelogs
 
 
 class VectorConstructor:
@@ -184,7 +185,7 @@ class VectorConstructor:
 
     # TODO: Include moneyline data in feature vector
     # TODO: Tack on target variable (win-loss binary / total runs / run differential / etc.)
-    def construct_game_vector(self, home_batters_df, home_pitcher_df, away_batters_df, away_pitcher_df, moneylines_df):
+    def construct_game_vector(self, game_json, home_batters_df, home_pitcher_df, away_batters_df, away_pitcher_df, moneylines_df):
         # Filter columns for batters (batting and fielding stats only)
         batting_stat_columns = [col for col in home_batters_df.columns if
                                 col.startswith('batting') or col.startswith('fielding')]
@@ -228,4 +229,44 @@ class VectorConstructor:
         game_vector['home_team_implied_odds'] = moneylines_df['home_team_implied_odds'].iloc[0]
         game_vector['away_team_implied_odds'] = moneylines_df['away_team_implied_odds'].iloc[0]
 
+        home_team_score = game_json['scoreboard']['defense']['score']
+        away_team_score = game_json['scoreboard']['offense']['score']
+        game_vector['home_team_won'] = 1 if home_team_score > away_team_score else 0
         return game_vector
+
+    async def construct_all_game_vectors(self, date_ranges=None):
+        # Initialize the game logs fetching class
+        game_logs_fetcher = bs_range_gamelogs()
+
+        # Fetch all game logs for the given date ranges
+        game_jsons = game_logs_fetcher.get_gamelogs_for_date_ranges(date_ranges=date_ranges)
+
+        all_game_vectors = []
+
+        # Iterate over each game JSON
+        for game_json in game_jsons:
+            # Parse the game details
+            game_date, home_team_abbr, away_team_abbr = self.parse_game_details(game_json)
+
+            # Fetch and process moneyline data for the game
+            moneylines_df = await self.fetch_game_odds(game_json)
+            moneylines_df = self.calculate_average_moneyline(moneylines_df)
+            moneylines_df['home_team_implied_odds'] = moneylines_df['price_avg'].apply(self.calculate_implied_odds)
+            moneylines_df['away_team_implied_odds'] = moneylines_df['price_avg'].apply(self.calculate_implied_odds)
+
+            # Extract player data up until this point in time
+            player_data_timeframe = datetime.strptime(game_date, '%Y-%m-%d') - timedelta(days=365)  # Example: 1 year of data before the game
+            player_ids = self.extract_team_players(game_json)
+            home_batters_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['home_batters'])
+            home_pitcher_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['home_pitchers'])
+            away_batters_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['away_batters'])
+            away_pitcher_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['away_pitchers'])
+
+            # Construct the game vector for this game
+            game_vector = self.construct_game_vector(home_batters_df, home_pitcher_df, away_batters_df, away_pitcher_df, moneylines_df, game_json)
+            all_game_vectors.append(game_vector)
+
+        # Combine all vectors into a single DataFrame
+        all_game_vectors_df = pd.DataFrame(all_game_vectors)
+
+        return all_game_vectors_df
