@@ -1,9 +1,112 @@
+import asyncio
+from datetime import datetime
+
 import pandas as pd
+from OddsBlaze import OddsBlazeAPI
 
 
 class VectorConstructor:
-    def __init__(self, player_df):
+    def __init__(self, player_df, odds_api=OddsBlazeAPI(), moneylines_df=None):
         self.player_df = player_df
+        self.odds_api = odds_api
+        self.moneylines_df = moneylines_df
+        self.abb_dict = {
+            "ARI": "ARI",  # Arizona Diamondbacks
+            "ATL": "ATL",  # Atlanta Braves
+            "BAL": "BAL",  # Baltimore Orioles
+            "BOS": "BOS",  # Boston Red Sox
+            "CHC": "CHN",  # Chicago Cubs
+            "CWS": "CHA",  # Chicago White Sox
+            "CIN": "CIN",  # Cincinnati Reds
+            "CLE": "CLE",  # Cleveland Indians
+            "COL": "COL",  # Colorado Rockies
+            "DET": "DET",  # Detroit Tigers
+            "HOU": "HOU",  # Houston Astros
+            "KC": "KCA",  # Kansas City Royals
+            "LAA": "ANA",  # Los Angeles Angels
+            "LAD": "LAN",  # Los Angeles Dodgers
+            "MIA": "MIA",  # Miami Marlins
+            "MIL": "MIL",  # Milwaukee Brewers
+            "MIN": "MIN",  # Minnesota Twins
+            "NYM": "NYN",  # New York Mets
+            "NYY": "NYA",  # New York Yankees
+            "OAK": "OAK",  # Oakland Athletics
+            "PHI": "PHI",  # Philadelphia Phillies
+            "PIT": "PIT",  # Pittsburgh Pirates
+            "SD": "SDN",  # San Diego Padres
+            "SF": "SFN",  # San Francisco Giants
+            "SEA": "SEA",  # Seattle Mariners
+            "STL": "SLN",  # St. Louis Cardinals
+            "TB": "TBA",  # Tampa Bay Rays
+            "TEX": "TEX",  # Texas Rangers
+            "TOR": "TOR",  # Toronto Blue Jays
+            "WSH": "WAS"  # Washington Nationals
+        }
+
+    def parse_game_details(self, game_json):
+        # Extract relevant details from the game JSON
+        game_date = game_json.get('gameDate')
+        home_team_info = game_json['scoreboard']['defense']['team']
+        away_team_info = game_json['scoreboard']['offense']['team']
+
+        # Convert date to a datetime object
+        game_date = datetime.strptime(game_date, "%m/%d/%Y").strftime('%Y-%m-%d')
+
+        # Extract team abbreviations
+        home_team_abbr = home_team_info['name']
+        away_team_abbr = away_team_info['name']
+
+        return game_date, home_team_abbr, away_team_abbr
+
+    async def fetch_game_odds(self, game_json):
+        # Parse game details
+        game_date, home_team, away_team = self.parse_game_details(game_json)
+
+        # Fetch moneyline data for the relevant league and date
+        moneyline_data = await self.odds_api.get_game_moneyline_data('mlb', region='us', price_format='american')
+
+        # Filter the results for the specific game
+        game_odds = moneyline_data[
+            (moneyline_data['home_team'] == self.abb_dict.get(home_team)) &
+            (moneyline_data['away_team'] == self.abb_dict.get(away_team)) &
+            (moneyline_data['commence_time'].str.contains(game_date))
+            ]
+
+        return game_odds
+
+    def calculate_average_moneyline(self, moneylines_df):
+        # Convert price column to numeric, ignoring errors for non-numeric values
+        moneylines_df['price'] = pd.to_numeric(moneylines_df['price'], errors='coerce')
+
+        # Group by game_id and team, then calculate the mean price for both home and away teams
+        average_prices = moneylines_df.groupby(['game_id', 'home_team', 'away_team'])['price'].mean().reset_index()
+
+        # Merge the average prices back into the original dataframe
+        moneylines_df = pd.merge(moneylines_df, average_prices, on=['game_id', 'home_team', 'away_team'],
+                                 suffixes=('', '_avg'))
+
+        return moneylines_df
+
+    @staticmethod
+    def calculate_implied_odds(moneyline):
+        if moneyline > 0:
+            return 100 / (moneyline + 100)
+        else:
+            return -moneyline / (-moneyline + 100)
+
+    def integrate_moneylines_and_odds(self, game_json):
+        # Fetch game odds for the specific game
+        game_odds = asyncio.run(self.fetch_game_odds(game_json))
+
+        # Calculate average moneylines
+        moneylines_df = game_odds.copy()  # Work with the fetched data
+        moneylines_df = self.calculate_average_moneyline(moneylines_df)
+
+        # Calculate implied odds and add them to the dataframe
+        moneylines_df['home_team_implied_odds'] = moneylines_df['price_avg'].apply(self.calculate_implied_odds)
+        moneylines_df['away_team_implied_odds'] = moneylines_df['price_avg'].apply(self.calculate_implied_odds)
+
+        return moneylines_df
 
     @staticmethod
     def extract_team_players(game_json):
@@ -81,10 +184,10 @@ class VectorConstructor:
 
     # TODO: Include moneyline data in feature vector
     # TODO: Tack on target variable (win-loss binary / total runs / run differential / etc.)
-    @staticmethod
-    def construct_game_vector(home_batters_df, home_pitcher_df, away_batters_df, away_pitcher_df):
+    def construct_game_vector(self, home_batters_df, home_pitcher_df, away_batters_df, away_pitcher_df, moneylines_df):
         # Filter columns for batters (batting and fielding stats only)
-        batting_stat_columns = [col for col in home_batters_df.columns if col.startswith('batting') or col.startswith('fielding')]
+        batting_stat_columns = [col for col in home_batters_df.columns if
+                                col.startswith('batting') or col.startswith('fielding')]
         home_batters_df = home_batters_df[batting_stat_columns + ['at_bats', 'player_id']]
         away_batters_df = away_batters_df[batting_stat_columns + ['at_bats', 'player_id']]
 
@@ -121,5 +224,8 @@ class VectorConstructor:
 
         # Concatenate the home and away vectors into a single vector
         game_vector = pd.concat([home_vector, away_vector], axis=0)
+
+        game_vector['home_team_implied_odds'] = moneylines_df['home_team_implied_odds'].iloc[0]
+        game_vector['away_team_implied_odds'] = moneylines_df['away_team_implied_odds'].iloc[0]
 
         return game_vector

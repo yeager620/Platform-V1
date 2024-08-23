@@ -17,7 +17,7 @@ async def main():
                            'display.max_columns', None,
                            'display.precision', 3,
                            ):
-        print(data)
+        print(data.head())
 
 
 if __name__ == "__main__":
