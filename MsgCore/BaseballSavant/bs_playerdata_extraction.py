@@ -1,4 +1,6 @@
 import json
+from datetime import datetime
+
 import pandas as pd
 
 
@@ -50,6 +52,24 @@ class bs_playerdata_extraction:
             player_data.append(base_record)
 
         return player_data
+
+    def get_player_info(self, player_id, game_json, team_type):
+        """
+        Retrieves the player information dictionary from the game JSON.
+
+        Parameters:
+            player_id (int): Unique identifier for the player.
+            game_json (dict): JSON data for the game.
+            team_type (str): 'home' or 'away'.
+
+        Returns:
+            dict or None: Player information dictionary or None if not found.
+        """
+        team_players = game_json['boxscore']['teams'][team_type].get('players', {})
+        for pid, info in team_players.items():
+            if info.get('person', {}).get('id') == player_id:
+                return info
+        return None
 
     def load_json(self):
         with open(self.json_file) as f:

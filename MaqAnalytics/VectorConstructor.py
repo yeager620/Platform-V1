@@ -43,6 +43,51 @@ class VectorConstructor:
             "TOR": "TOR",  # Toronto Blue Jays
             "WSH": "WAS"  # Washington Nationals
         }
+        self.retrosheet_field_names = [
+            "game_id", "date", "game_number", "appearance_date", "team_id", "player_id",
+            "batting_order", "batting_order_sequence", "home_flag", "opponent_id",
+            "park_id",
+            # Batting stats
+            "B_G", "B_PA", "B_AB", "B_R", "B_H", "B_TB", "B_2B", "B_3B",
+            "B_HR", "B_HR4", "B_RBI", "B_GW", "B_BB", "B_IBB", "B_SO",
+            "B_GDP", "B_HP", "B_SH", "B_SF", "B_SB", "B_CS", "B_XI",
+            "B_G_DH", "B_G_PH", "B_G_PR",
+            # Pitching stats
+            "P_G", "P_GS", "P_CG", "P_SHO", "P_GF", "P_W", "P_L",
+            "P_SV", "P_OUT", "P_TBF", "P_AB", "P_R", "P_ER", "P_H",
+            "P_TB", "P_2B", "P_3B", "P_HR", "P_HR4", "P_BB",
+            "P_IBB", "P_SO", "P_GDP", "P_HP", "P_SH", "P_SF",
+            "P_XI", "P_WP", "P_BK", "P_IR", "P_IRS", "P_GO",
+            "P_AO", "P_PITCH", "P_STRIKE",
+            # Fielding stats for P, C, 1B, 2B, 3B, SS, LF, CF, RF
+            # Pitcher
+            "F_P_G", "F_P_GS", "F_P_OUT", "F_P_TC", "F_P_PO",
+            "F_P_A", "F_P_E", "F_P_DP", "F_P_TP",
+            # Catcher
+            "F_C_G", "F_C_GS", "F_C_OUT", "F_C_TC", "F_C_PO",
+            "F_C_A", "F_C_E", "F_C_DP", "F_C_TP", "F_C_PB", "F_C_IX",
+            # First Baseman
+            "F_1B_G", "F_1B_GS", "F_1B_OUT", "F_1B_TC", "F_1B_PO",
+            "F_1B_A", "F_1B_E", "F_1B_DP", "F_1B_TP",
+            # Second Baseman
+            "F_2B_G", "F_2B_GS", "F_2B_OUT", "F_2B_TC", "F_2B_PO",
+            "F_2B_A", "F_2B_E", "F_2B_DP", "F_2B_TP",
+            # Third Baseman
+            "F_3B_G", "F_3B_GS", "F_3B_OUT", "F_3B_TC", "F_3B_PO",
+            "F_3B_A", "F_3B_E", "F_3B_DP", "F_3B_TP",
+            # Shortstop
+            "F_SS_G", "F_SS_GS", "F_SS_OUT", "F_SS_TC", "F_SS_PO",
+            "F_SS_A", "F_SS_E", "F_SS_DP", "F_SS_TP",
+            # Left Fielder
+            "F_LF_G", "F_LF_GS", "F_LF_OUT", "F_LF_TC", "F_LF_PO",
+            "F_LF_A", "F_LF_E", "F_LF_DP", "F_LF_TP",
+            # Center Fielder
+            "F_CF_G", "F_CF_GS", "F_CF_OUT", "F_CF_TC", "F_CF_PO",
+            "F_CF_A", "F_CF_E", "F_CF_DP", "F_CF_TP",
+            # Right Fielder
+            "F_RF_G", "F_RF_GS", "F_RF_OUT", "F_RF_TC", "F_RF_PO",
+            "F_RF_A", "F_RF_E", "F_RF_DP", "F_RF_TP"
+        ]
 
     def parse_game_details(self, game_json):
         # Extract relevant details from the game JSON
@@ -183,8 +228,7 @@ class VectorConstructor:
 
         return final_normalized_stats
 
-    # TODO: Include moneyline data in feature vector
-    # TODO: Tack on target variable (win-loss binary / total runs / run differential / etc.)
+    # TODO: Change moneyline data source from OddsBlaze (live) to SportsBookReview (Historical)
     def construct_game_vector(self, game_json, home_batters_df, home_pitcher_df, away_batters_df, away_pitcher_df, moneylines_df):
         # Filter columns for batters (batting and fielding stats only)
         batting_stat_columns = [col for col in home_batters_df.columns if
