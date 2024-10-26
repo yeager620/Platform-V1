@@ -314,3 +314,73 @@ class VectorConstructor:
         all_game_vectors_df = pd.DataFrame(all_game_vectors)
 
         return all_game_vectors_df
+
+
+def match_games_with_moneylines(
+    feature_df: pd.DataFrame,
+    moneyline_df: pd.DataFrame,
+    date_col: str = 'date',
+    home_team_col: str = 'home_team',
+    away_team_col: str = 'away_team',
+    moneyline_team_col: str = 'team',
+    moneyline_opponent_col: str = 'opponent'
+) -> pd.DataFrame:
+    """
+    Matches each game feature vector with its corresponding moneyline data rows.
+
+    Parameters:
+        feature_df (pd.DataFrame): DataFrame containing game feature vectors with at least 'date', 'home_team', and 'away_team' columns.
+        moneyline_df (pd.DataFrame): DataFrame containing moneyline data with at least 'date', 'team', 'opponent' columns.
+        date_col (str): Column name for date in both DataFrames.
+        home_team_col (str): Column name for home team in feature_df.
+        away_team_col (str): Column name for away team in feature_df.
+        moneyline_team_col (str): Column name for team in moneyline_df.
+        moneyline_opponent_col (str): Column name for opponent in moneyline_df.
+
+    Returns:
+        pd.DataFrame: Merged DataFrame with game feature vectors and their corresponding moneyline data.
+    """
+    # Step 1: Ensure date columns are in datetime format
+    feature_df[date_col] = pd.to_datetime(feature_df[date_col])
+    moneyline_df[date_col] = pd.to_datetime(moneyline_df[date_col])
+
+    # Step 2: Standardize team names to uppercase to ensure consistency
+    feature_df[home_team_col] = feature_df[home_team_col].str.upper()
+    feature_df[away_team_col] = feature_df[away_team_col].str.upper()
+    moneyline_df[moneyline_team_col] = moneyline_df[moneyline_team_col].str.upper()
+    moneyline_df[moneyline_opponent_col] = moneyline_df[moneyline_opponent_col].str.upper()
+
+    # Step 3: Merge where moneyline_df.team matches feature_df.home_team and moneyline_df.opponent matches feature_df.away_team
+    merged_home = pd.merge(
+        moneyline_df,
+        feature_df,
+        how='left',
+        left_on=[date_col, moneyline_team_col, moneyline_opponent_col],
+        right_on=[date_col, home_team_col, away_team_col],
+        suffixes=('_moneyline', '_feature')
+    )
+
+    # Step 4: Merge where moneyline_df.team matches feature_df.away_team and moneyline_df.opponent matches feature_df.home_team
+    merged_away = pd.merge(
+        moneyline_df,
+        feature_df,
+        how='left',
+        left_on=[date_col, moneyline_opponent_col, moneyline_team_col],
+        right_on=[date_col, home_team_col, away_team_col],
+        suffixes=('_moneyline', '_feature')
+    )
+
+    # Step 5: Concatenate both merged DataFrames
+    merged = pd.concat([merged_home, merged_away], ignore_index=True)
+
+    # Step 6: Drop rows where game feature data is missing (i.e., merge was unsuccessful)
+    merged.dropna(subset=[home_team_col, away_team_col], inplace=True)
+
+    # Step 7: Optional - Drop duplicate or unnecessary columns
+    # For example, you might want to drop '_feature' columns if not needed
+    # merged.drop(columns=[col for col in merged.columns if col.endswith('_feature')], inplace=True)
+
+    # Step 8: Reset index if necessary
+    merged.reset_index(drop=True, inplace=True)
+
+    return merged
