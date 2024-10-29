@@ -1,16 +1,23 @@
+import pandas as pd
 import asyncio
 from datetime import datetime, timedelta
-import pandas as pd
-from OddsBlaze import OddsBlazeAPI
-from BaseballSavant.bs_hist_gamelogs import bs_hist_gamelogs
-from BaseballSavant.bs_range_gamelogs import bs_range_gamelogs
+from SportsBookReview import SportsbookReviewScraper
+from bs_retrosheet_converter import SavantRetrosheetConverter
 
 
 class VectorConstructor:
-    def __init__(self, player_df, odds_api=OddsBlazeAPI(), moneylines_df=None):
+    def __init__(self, player_df, sportsbook_scraper: SportsbookReviewScraper, moneylines_df=None):
+        """
+        Initializes the VectorConstructor with necessary components.
+
+        Parameters:
+            player_df (pd.DataFrame): DataFrame containing player statistics.
+            sportsbook_scraper (SportsbookReviewScraper): Instance for scraping SportsBookReview odds data.
+            moneylines_df (pd.DataFrame): DataFrame containing historical moneyline data. If None, it will be fetched using the scraper.
+        """
         self.player_df = player_df
-        self.odds_api = odds_api
-        self.moneylines_df = moneylines_df
+        self.sportsbook_scraper = sportsbook_scraper
+        self.moneylines_df = moneylines_df or self.scrape_moneylines()
         self.abb_dict = {
             "ARI": "ARI",  # Arizona Diamondbacks
             "ATL": "ATL",  # Atlanta Braves
@@ -19,7 +26,7 @@ class VectorConstructor:
             "CHC": "CHN",  # Chicago Cubs
             "CWS": "CHA",  # Chicago White Sox
             "CIN": "CIN",  # Cincinnati Reds
-            "CLE": "CLE",  # Cleveland Indians
+            "CLE": "CLE",  # Cleveland Guardians
             "COL": "COL",  # Colorado Rockies
             "DET": "DET",  # Detroit Tigers
             "HOU": "HOU",  # Houston Astros
@@ -90,93 +97,130 @@ class VectorConstructor:
         ]
 
     def parse_game_details(self, game_json):
-        # Extract relevant details from the game JSON
-        game_date = game_json.get('gameDate')
-        home_team_info = game_json['scoreboard']['defense']['team']
-        away_team_info = game_json['scoreboard']['offense']['team']
+        """
+        Extracts relevant details from the game JSON.
 
-        # Convert date to a datetime object
-        game_date = datetime.strptime(game_date, "%m/%d/%Y").strftime('%Y-%m-%d')
+        Parameters:
+            game_json (dict): JSON data for the game.
+
+        Returns:
+            tuple: (game_date, home_team_abbr, away_team_abbr)
+        """
+        # Extract game date
+        game_date_str = game_json.get('gameDate')
+        game_date = datetime.strptime(game_date_str, "%Y-%m-%dT%H:%M:%SZ").strftime('%Y-%m-%d')
 
         # Extract team abbreviations
-        home_team_abbr = home_team_info['name']
-        away_team_abbr = away_team_info['name']
+        home_team_abbr = game_json['scoreboard']['teams']['home']['team']['abbreviation']
+        away_team_abbr = game_json['scoreboard']['teams']['away']['team']['abbreviation']
 
         return game_date, home_team_abbr, away_team_abbr
 
     async def fetch_game_odds(self, game_json):
+        """
+        Fetches moneyline odds for a specific game from SportsBookReview.
+
+        Parameters:
+            game_json (dict): JSON data for the game.
+
+        Returns:
+            pd.DataFrame: DataFrame containing moneyline odds for the game.
+        """
         # Parse game details
         game_date, home_team, away_team = self.parse_game_details(game_json)
 
-        # Fetch moneyline data for the relevant league and date
-        moneyline_data = await self.odds_api.get_game_moneyline_data('mlb', region='us', price_format='american')
+        # Scrape odds data for the game date
+        odds_df = self.sportsbook_scraper.scrape()
 
-        # Filter the results for the specific game
-        game_odds = moneyline_data[
-            (moneyline_data['home_team'] == self.abb_dict.get(home_team)) &
-            (moneyline_data['away_team'] == self.abb_dict.get(away_team)) &
-            (moneyline_data['commence_time'].str.contains(game_date))
+        # Filter odds for the specific game based on teams and date
+        game_odds = odds_df[
+            (odds_df['date'] == game_date) &
+            (
+                    (
+                            self.abb_dict[odds_df['team']] == home_team
+                    ) &
+                    (
+                            self.abb_dict[odds_df['opponent']] == away_team
+                    )
+            )
             ]
 
         return game_odds
 
     def calculate_average_moneyline(self, moneylines_df):
+        """
+        Calculates the average moneyline odds for home and away teams.
+
+        Parameters:
+            moneylines_df (pd.DataFrame): DataFrame containing moneyline data for a specific game.
+
+        Returns:
+            pd.DataFrame: DataFrame with average moneyline odds and implied probabilities.
+        """
         # Convert price column to numeric, ignoring errors for non-numeric values
-        moneylines_df['price'] = pd.to_numeric(moneylines_df['price'], errors='coerce')
+        moneylines_df['odds'] = pd.to_numeric(moneylines_df['odds'], errors='coerce')
 
-        # Group by game_id and team, then calculate the mean price for both home and away teams
-        average_prices = moneylines_df.groupby(['game_id', 'home_team', 'away_team'])['price'].mean().reset_index()
+        # Drop rows with NaN odds
+        moneylines_df = moneylines_df.dropna(subset=['odds'])
 
-        # Merge the average prices back into the original dataframe
-        moneylines_df = pd.merge(moneylines_df, average_prices, on=['game_id', 'home_team', 'away_team'],
-                                 suffixes=('', '_avg'))
+        # Calculate average odds for home and away teams
+        average_odds = moneylines_df.groupby(['team', 'opponent'])['odds'].mean().reset_index()
 
-        return moneylines_df
+        # Calculate implied probabilities
+        average_odds['home_team_implied_odds'] = average_odds['odds'].apply(self.calculate_implied_odds)
+        average_odds['away_team_implied_odds'] = average_odds['odds'].apply(self.calculate_implied_odds)
+
+        return average_odds
 
     @staticmethod
     def calculate_implied_odds(moneyline):
+        """
+        Calculates the implied probability from moneyline odds.
+
+        Parameters:
+            moneyline (float): Moneyline odds.
+
+        Returns:
+            float: Implied probability.
+        """
         if moneyline > 0:
             return 100 / (moneyline + 100)
         else:
             return -moneyline / (-moneyline + 100)
 
-    def integrate_moneylines_and_odds(self, game_json):
-        # Fetch game odds for the specific game
-        game_odds = asyncio.run(self.fetch_game_odds(game_json))
-
-        # Calculate average moneylines
-        moneylines_df = game_odds.copy()  # Work with the fetched data
-        moneylines_df = self.calculate_average_moneyline(moneylines_df)
-
-        # Calculate implied odds and add them to the dataframe
-        moneylines_df['home_team_implied_odds'] = moneylines_df['price_avg'].apply(self.calculate_implied_odds)
-        moneylines_df['away_team_implied_odds'] = moneylines_df['price_avg'].apply(self.calculate_implied_odds)
-
-        return moneylines_df
-
     @staticmethod
     def extract_team_players(game_json):
+        """
+        Extracts player IDs for home and away teams, segregating batters and pitchers.
+
+        Parameters:
+            game_json (dict): JSON data for the game.
+
+        Returns:
+            dict: Dictionary containing lists of home batters, home pitchers, away batters, away pitchers.
+        """
         home_batters = []
         home_pitchers = []
         away_batters = []
         away_pitchers = []
 
-        players = game_json['players']
+        players = game_json['boxscore']['teams']['home'].get('players', {})
+        for player_key, player_info in players.items():
+            position = player_info.get('position', {}).get('code', '')
+            player_id = player_info.get('person', {}).get('id')
+            if position == 'P':
+                home_pitchers.append(player_id)
+            else:
+                home_batters.append(player_id)
 
-        for player_id, player_info in players.items():
-            team_id = player_info['parentTeamId']
-            position = player_info['position']['code']
-
-            if team_id == game_json['teams']['home']['id']:
-                if position == 'P':
-                    home_pitchers.append(player_id)
-                else:
-                    home_batters.append(player_id)
-            elif team_id == game_json['teams']['away']['id']:
-                if position == 'P':
-                    away_pitchers.append(player_id)
-                else:
-                    away_batters.append(player_id)
+        players = game_json['boxscore']['teams']['away'].get('players', {})
+        for player_key, player_info in players.items():
+            position = player_info.get('position', {}).get('code', '')
+            player_id = player_info.get('person', {}).get('id')
+            if position == 'P':
+                away_pitchers.append(player_id)
+            else:
+                away_batters.append(player_id)
 
         return {
             "home_batters": home_batters,
@@ -186,201 +230,180 @@ class VectorConstructor:
         }
 
     def fetch_player_stats(self, start, end, player_ids):
-        # Convert date columns to datetime
+        """
+        Fetches player statistics within a date range.
+
+        Parameters:
+            start (datetime): Start date.
+            end (datetime): End date.
+            player_ids (list): List of player IDs.
+
+        Returns:
+            pd.DataFrame: DataFrame containing statistics for the specified players.
+        """
+        # Ensure 'date' column is datetime
         self.player_df['date'] = pd.to_datetime(self.player_df['date'])
-        # Filter by date range
-        player_df = self.player_df[(self.player_df['date'] >= start) & (self.player_df['date'] <= end)]
-        # Get stats from relevant players
-        return player_df[player_df['player_id'].isin(player_ids)]
 
-    # TODO: Finish normalization logic (particularly for EWMA)
-    def normalize_player_stats(self, start_date, end_date, player_ids, use_exponential_weight=True, alpha=0.5):
-        # Fetch the filtered stats for the given players within the date range
-        player_stats = self.fetch_player_stats(start_date, end_date, player_ids)
+        # Filter by date range and player IDs
+        player_stats = self.player_df[
+            (self.player_df['date'] >= start) &
+            (self.player_df['date'] <= end) &
+            (self.player_df['player_id'].isin(player_ids))
+            ]
 
-        # Define columns that should not be averaged (non-stat columns)
-        non_stat_prefixes = ["season_", "game_status_", "position_"]
-        base_columns = ['game_id', 'date', 'player_id', 'player_name', 'jersey_number',
-                        'position_code', 'position_name', 'batting_order',
-                        'status_code', 'status_description', 'team_id']
+        return player_stats
 
-        # Identify stat columns by excluding non-stat columns
-        stat_columns = [
-            col for col in player_stats.columns
-            if not any(col.startswith(prefix) for prefix in non_stat_prefixes) and col not in base_columns
-        ]
+    def construct_game_vector(self, game_json, home_batters_df, home_pitcher_df, away_batters_df, away_pitcher_df,
+                              moneylines_df):
+        """
+        Constructs a feature vector for a single game.
 
-        # Group by player_id and calculate the average or exponentially weighted average for these columns only
-        if use_exponential_weight:
-            # Exponentially weighted mean
-            normalized_stats = player_stats.groupby('player_id')[stat_columns].apply(
-                lambda x: x.sort_values('date').ewm(alpha=alpha).mean()
-            )
+        Parameters:
+            game_json (dict): JSON data for the game.
+            home_batters_df (pd.DataFrame): DataFrame containing home batters' stats.
+            home_pitcher_df (pd.DataFrame): DataFrame containing home pitchers' stats.
+            away_batters_df (pd.DataFrame): DataFrame containing away batters' stats.
+            away_pitcher_df (pd.DataFrame): DataFrame containing away pitchers' stats.
+            moneylines_df (pd.DataFrame): DataFrame containing moneyline odds for the game.
+
+        Returns:
+            dict: Dictionary representing the feature vector for the game.
+        """
+        # Handle cases where no moneyline data is found
+        if moneylines_df.empty:
+            print(f"No moneyline data found for game_id {game_json['scoreboard']['gamePk']}. Skipping this game.")
+            return None
+
+        # Calculate weighted average of batting stats for home team
+        home_weighted_avg = self.calculate_weighted_average(home_batters_df, 'at_bats')
+
+        # Calculate weighted average of batting stats for away team
+        away_weighted_avg = self.calculate_weighted_average(away_batters_df, 'at_bats')
+
+        # Calculate average pitching stats for home team
+        home_pitching_avg = home_pitcher_df.mean(numeric_only=True)
+
+        # Calculate average pitching stats for away team
+        away_pitching_avg = away_pitcher_df.mean(numeric_only=True)
+
+        # Combine all features into a single dictionary
+        feature_vector = {}
+
+        # Home team features
+        for stat, value in home_weighted_avg.items():
+            feature_vector[f'home_{stat}'] = value
+        for stat, value in home_pitching_avg.items():
+            feature_vector[f'home_{stat}'] = value
+
+        # Away team features
+        for stat, value in away_weighted_avg.items():
+            feature_vector[f'away_{stat}'] = value
+        for stat, value in away_pitching_avg.items():
+            feature_vector[f'away_{stat}'] = value
+
+        # Moneyline features
+        feature_vector['home_team_implied_odds'] = moneylines_df['home_team_implied_odds'].iloc[0]
+        feature_vector['away_team_implied_odds'] = moneylines_df['away_team_implied_odds'].iloc[0]
+
+        # Target variable
+        home_team_score = game_json['scoreboard']['teams']['home']['score']
+        away_team_score = game_json['scoreboard']['teams']['away']['score']
+        feature_vector['home_team_won'] = 1 if home_team_score > away_team_score else 0
+
+        return feature_vector
+
+    def calculate_weighted_average(self, df: pd.DataFrame, weight_column: str) -> dict:
+        """
+        Calculates the weighted average of statistics based on a specified weight column.
+
+        Parameters:
+            df (pd.DataFrame): DataFrame containing player statistics.
+            weight_column (str): Column name to be used as weights.
+
+        Returns:
+            dict: Dictionary of weighted average statistics.
+        """
+        if df.empty or weight_column not in df.columns:
+            return {}
+
+        # Select numeric columns for calculation
+        numeric_cols = df.select_dtypes(include='number').columns.tolist()
+        numeric_cols.remove(weight_column) if weight_column in numeric_cols else None
+
+        # Calculate weighted average
+        weighted_avg = {}
+        total_weight = df[weight_column].sum()
+        if total_weight == 0:
+            # Avoid division by zero
+            for col in numeric_cols:
+                weighted_avg[col] = 0
         else:
-            # Regular mean
-            normalized_stats = player_stats.groupby('player_id')[stat_columns].mean()
+            for col in numeric_cols:
+                weighted_avg[col] = (df[col] * df[weight_column]).sum() / total_weight
 
-        # Combine the normalized stats with non-stat columns like player_id, player_name, etc.
-        non_stat_data = player_stats.groupby('player_id')[base_columns].first().reset_index()
+        return weighted_avg
 
-        # Merge the non-stat columns back with the normalized stats
-        final_normalized_stats = pd.merge(non_stat_data, normalized_stats, on='player_id')
+    def scrape_moneylines(self):
+        """
+        Scrapes historical moneyline data using the SportsbookReviewScraper.
 
-        return final_normalized_stats
-
-    # TODO: Change moneyline data source from OddsBlaze (live) to SportsBookReview (Historical)
-    def construct_game_vector(self, game_json, home_batters_df, home_pitcher_df, away_batters_df, away_pitcher_df, moneylines_df):
-        # Filter columns for batters (batting and fielding stats only)
-        batting_stat_columns = [col for col in home_batters_df.columns if
-                                col.startswith('batting') or col.startswith('fielding')]
-        home_batters_df = home_batters_df[batting_stat_columns + ['at_bats', 'player_id']]
-        away_batters_df = away_batters_df[batting_stat_columns + ['at_bats', 'player_id']]
-
-        # Filter columns for pitchers (pitching stats only)
-        pitching_stat_columns = [col for col in home_pitcher_df.columns if col.startswith('pitching')]
-        home_pitcher_df = home_pitcher_df[pitching_stat_columns]
-        away_pitcher_df = away_pitcher_df[pitching_stat_columns]
-
-        # Ensure that only numeric columns are processed
-        home_batters_df = home_batters_df.select_dtypes(include='number')
-        away_batters_df = away_batters_df.select_dtypes(include='number')
-        home_pitcher_df = home_pitcher_df.select_dtypes(include='number')
-        away_pitcher_df = away_pitcher_df.select_dtypes(include='number')
-
-        # Calculate the weighted average of the batting stats for the home team
-        home_weighted_avg = (home_batters_df.drop(columns=['at_bats', 'player_id'])  # Drop non-stat columns
-                             .multiply(home_batters_df['at_bats'], axis=0)  # Multiply by at_bats
-                             .sum() / home_batters_df['at_bats'].sum())  # Weighted average
-
-        # Calculate the weighted average of the batting stats for the away team
-        away_weighted_avg = (away_batters_df.drop(columns=['at_bats', 'player_id'])  # Drop non-stat columns
-                             .multiply(away_batters_df['at_bats'], axis=0)  # Multiply by at_bats
-                             .sum() / away_batters_df['at_bats'].sum())  # Weighted average
-
-        # Average the pitching stats for the home team
-        home_pitching_avg = home_pitcher_df.mean()
-
-        # Average the pitching stats for the away team
-        away_pitching_avg = away_pitcher_df.mean()
-
-        # Concatenate the weighted averages and the pitching stats into a single vector for each team
-        home_vector = pd.concat([home_weighted_avg, home_pitching_avg], axis=0)
-        away_vector = pd.concat([away_weighted_avg, away_pitching_avg], axis=0)
-
-        # Concatenate the home and away vectors into a single vector
-        game_vector = pd.concat([home_vector, away_vector], axis=0)
-
-        game_vector['home_team_implied_odds'] = moneylines_df['home_team_implied_odds'].iloc[0]
-        game_vector['away_team_implied_odds'] = moneylines_df['away_team_implied_odds'].iloc[0]
-
-        home_team_score = game_json['scoreboard']['defense']['score']
-        away_team_score = game_json['scoreboard']['offense']['score']
-        game_vector['home_team_won'] = 1 if home_team_score > away_team_score else 0
-        return game_vector
+        Returns:
+            pd.DataFrame: DataFrame containing historical moneyline data.
+        """
+        print("Scraping historical moneyline data from SportsBookReview...")
+        moneylines_df = self.sportsbook_scraper.scrape()
+        print("Moneyline data scraping completed.")
+        return moneylines_df
 
     async def construct_all_game_vectors(self, date_ranges=None):
+        """
+        Constructs feature vectors for all games within the specified date ranges.
+
+        Parameters:
+            date_ranges (list of tuples): Each tuple contains (start_date, end_date) in "MM/DD/YYYY" format.
+
+        Returns:
+            pd.DataFrame: DataFrame containing feature vectors and target variables for all games.
+        """
         # Initialize the game logs fetching class
-        game_logs_fetcher = bs_range_gamelogs()
+        retrosheet_df = self.savant_converter.process_games_retrosheet_with_outcome()
 
-        # Fetch all game logs for the given date ranges
-        game_jsons = game_logs_fetcher.get_gamelogs_for_date_ranges(date_ranges=date_ranges)
+        # Iterate over each game in retrosheet_df and construct feature vectors
+        feature_vectors = []
+        for _, row in retrosheet_df.iterrows():
+            game_id = row['game_id']
+            game_json = self.savant_converter.fetch_gamelog(game_id)
+            if not game_json:
+                print(f"Game JSON for game_id {game_id} not found. Skipping.")
+                continue
 
-        all_game_vectors = []
-
-        # Iterate over each game JSON
-        for game_json in game_jsons:
-            # Parse the game details
-            game_date, home_team_abbr, away_team_abbr = self.parse_game_details(game_json)
-
-            # Fetch and process moneyline data for the game
-            moneylines_df = await self.fetch_game_odds(game_json)
-            moneylines_df = self.calculate_average_moneyline(moneylines_df)
-            moneylines_df['home_team_implied_odds'] = moneylines_df['price_avg'].apply(self.calculate_implied_odds)
-            moneylines_df['away_team_implied_odds'] = moneylines_df['price_avg'].apply(self.calculate_implied_odds)
-
-            # Extract player data up until this point in time
-            player_data_timeframe = datetime.strptime(game_date, '%Y-%m-%d') - timedelta(days=365)  # Example: 1 year of data before the game
+            # Extract player IDs and fetch their stats up to the game date
             player_ids = self.extract_team_players(game_json)
+            game_date = row['date']
+            player_data_timeframe = datetime.strptime(game_date, '%Y-%m-%d') - timedelta(days=365)  # 1 year before game
             home_batters_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['home_batters'])
             home_pitcher_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['home_pitchers'])
             away_batters_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['away_batters'])
             away_pitcher_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['away_pitchers'])
 
-            # Construct the game vector for this game
-            game_vector = self.construct_game_vector(home_batters_df, home_pitcher_df, away_batters_df, away_pitcher_df, moneylines_df, game_json)
-            all_game_vectors.append(game_vector)
+            # Fetch and integrate moneyline data
+            moneylines_df = await self.fetch_game_odds(game_json)
+            moneylines_df = self.calculate_average_moneyline(moneylines_df)
 
-        # Combine all vectors into a single DataFrame
-        all_game_vectors_df = pd.DataFrame(all_game_vectors)
+            # Construct game vector
+            game_vector = self.construct_game_vector(
+                game_json=game_json,
+                home_batters_df=home_batters_df,
+                home_pitcher_df=home_pitcher_df,
+                away_batters_df=away_batters_df,
+                away_pitcher_df=away_pitcher_df,
+                moneylines_df=moneylines_df
+            )
 
-        return all_game_vectors_df
+            if game_vector:
+                feature_vectors.append(game_vector)
 
+        # Combine all feature vectors into a single DataFrame
+        feature_df = pd.DataFrame(feature_vectors)
 
-def match_games_with_moneylines(
-    feature_df: pd.DataFrame,
-    moneyline_df: pd.DataFrame,
-    date_col: str = 'date',
-    home_team_col: str = 'home_team',
-    away_team_col: str = 'away_team',
-    moneyline_team_col: str = 'team',
-    moneyline_opponent_col: str = 'opponent'
-) -> pd.DataFrame:
-    """
-    Matches each game feature vector with its corresponding moneyline data rows.
-
-    Parameters:
-        feature_df (pd.DataFrame): DataFrame containing game feature vectors with at least 'date', 'home_team', and 'away_team' columns.
-        moneyline_df (pd.DataFrame): DataFrame containing moneyline data with at least 'date', 'team', 'opponent' columns.
-        date_col (str): Column name for date in both DataFrames.
-        home_team_col (str): Column name for home team in feature_df.
-        away_team_col (str): Column name for away team in feature_df.
-        moneyline_team_col (str): Column name for team in moneyline_df.
-        moneyline_opponent_col (str): Column name for opponent in moneyline_df.
-
-    Returns:
-        pd.DataFrame: Merged DataFrame with game feature vectors and their corresponding moneyline data.
-    """
-    # Step 1: Ensure date columns are in datetime format
-    feature_df[date_col] = pd.to_datetime(feature_df[date_col])
-    moneyline_df[date_col] = pd.to_datetime(moneyline_df[date_col])
-
-    # Step 2: Standardize team names to uppercase to ensure consistency
-    feature_df[home_team_col] = feature_df[home_team_col].str.upper()
-    feature_df[away_team_col] = feature_df[away_team_col].str.upper()
-    moneyline_df[moneyline_team_col] = moneyline_df[moneyline_team_col].str.upper()
-    moneyline_df[moneyline_opponent_col] = moneyline_df[moneyline_opponent_col].str.upper()
-
-    # Step 3: Merge where moneyline_df.team matches feature_df.home_team and moneyline_df.opponent matches feature_df.away_team
-    merged_home = pd.merge(
-        moneyline_df,
-        feature_df,
-        how='left',
-        left_on=[date_col, moneyline_team_col, moneyline_opponent_col],
-        right_on=[date_col, home_team_col, away_team_col],
-        suffixes=('_moneyline', '_feature')
-    )
-
-    # Step 4: Merge where moneyline_df.team matches feature_df.away_team and moneyline_df.opponent matches feature_df.home_team
-    merged_away = pd.merge(
-        moneyline_df,
-        feature_df,
-        how='left',
-        left_on=[date_col, moneyline_opponent_col, moneyline_team_col],
-        right_on=[date_col, home_team_col, away_team_col],
-        suffixes=('_moneyline', '_feature')
-    )
-
-    # Step 5: Concatenate both merged DataFrames
-    merged = pd.concat([merged_home, merged_away], ignore_index=True)
-
-    # Step 6: Drop rows where game feature data is missing (i.e., merge was unsuccessful)
-    merged.dropna(subset=[home_team_col, away_team_col], inplace=True)
-
-    # Step 7: Optional - Drop duplicate or unnecessary columns
-    # For example, you might want to drop '_feature' columns if not needed
-    # merged.drop(columns=[col for col in merged.columns if col.endswith('_feature')], inplace=True)
-
-    # Step 8: Reset index if necessary
-    merged.reset_index(drop=True, inplace=True)
-
-    return merged
+        return feature_df
