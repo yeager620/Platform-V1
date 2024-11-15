@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from sklearn.feature_selection import RFECV
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
@@ -43,6 +44,11 @@ class BacktestingEngine:
             initial_train_size (float): Proportion of the dataset to use for initial training before backtesting. Defaults to 0.1 (10%).
             random_state (int): Controls the shuffling applied to the data before splitting. Defaults to 42.
         """
+        self.y_train = None
+        self.X_train = None
+        self.y = None
+        self.X = None
+        self.preprocessor = None
         self.data = data.copy()
         self.target_column = target_column
         self.moneyline_columns = moneyline_columns  # [home_moneyline, away_moneyline]
@@ -185,6 +191,31 @@ class BacktestingEngine:
         proba = self.pipeline.predict_proba(game_features)[0][1]  # Assuming positive class is home win
         return proba
 
+    def optimize_features(self):
+        """
+        Uses Recursive Feature Elimination to find the best set of features that maximizes model performance.
+        """
+        # Define an RFE with cross-validation to determine the optimal number of features
+        rfe = RFECV(
+            estimator=self.pipeline.named_steps['calibrated_classifier'].base_estimator,
+            step=1,
+            cv=5,
+            scoring='roc_auc'  # Using ROC AUC as performance metric
+        )
+
+        # Fit RFE on the training data
+        self.pipeline.named_steps['preprocessor'].fit(self.X_train)
+        X_train_transformed = self.pipeline.named_steps['preprocessor'].transform(self.X_train)
+        rfe.fit(X_train_transformed, self.y_train)
+
+        # Update the pipeline to only use the selected features
+        self.pipeline.named_steps['preprocessor'].transformers_[0][2] = [col for i, col in
+                                                                         enumerate(self.X_train.columns) if
+                                                                         rfe.support_[i]]
+
+        # Print out the best features
+        print("Optimal features selected:", self.pipeline.named_steps['preprocessor'].transformers_[0][2])
+
     def run_backtest(self, initial_bankroll: float = 10000.0):
         """
         Executes the backtesting simulation using the Kelly betting strategy.
@@ -289,7 +320,8 @@ class BacktestingEngine:
         backtest_results = pd.DataFrame(results)
         return backtest_results
 
-    def kelly_criterion(self, prob: float, odds: float) -> float:
+    @staticmethod
+    def kelly_criterion(prob: float, odds: float) -> float:
         """
         Calculates the Kelly fraction for a given probability and odds.
 
@@ -304,7 +336,8 @@ class BacktestingEngine:
             return 0.0
         return max((prob * (odds - 1) - (1 - prob)) / (odds - 1), 0.0)
 
-    def moneyline_to_decimal(self, moneyline: float) -> float:
+    @staticmethod
+    def moneyline_to_decimal(moneyline: float) -> float:
         """
         Converts American moneyline odds to decimal odds.
 
@@ -322,7 +355,8 @@ class BacktestingEngine:
             # Handle cases where moneyline is zero or invalid
             return 1.0  # Represents no payout
 
-    def evaluate_backtest(self, backtest_results: pd.DataFrame):
+    @staticmethod
+    def evaluate_backtest(backtest_results: pd.DataFrame):
         """
         Evaluates the profitability of the backtest simulation.
 
@@ -358,6 +392,9 @@ class BacktestingEngine:
             dict: Dictionary containing accuracy metrics, classification report, confusion matrix, and backtest evaluation.
             pd.DataFrame: DataFrame containing backtest results for each game.
         """
+        # Run Recursive Feature Elimination (RFE) and optimize features
+        self.optimize_features()
+
         # Run backtest
         print("Starting backtest simulation...")
         backtest_results = self.run_backtest()

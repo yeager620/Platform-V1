@@ -535,7 +535,7 @@ class SavantRetrosheetConverter:
         Returns:
             list: List of gamePk integers.
         """
-        url = self.base_schedule_url.format(start_date=self.start_date, end_date=self.current_date)
+        url = self.base_schedule_url.format(start_date=self.start_date, end_date=self.end_date)
         response = requests.get(url)
         if response.status_code != 200:
             print(f"Failed to fetch gamePk's: {response.status_code}")
@@ -581,7 +581,8 @@ class SavantRetrosheetConverter:
                 gamelogs.append(gamelog)
         return gamelogs
 
-    def initialize_cumulative_stats(self):
+    @staticmethod
+    def initialize_cumulative_stats():
         """
         Initializes data structures to hold cumulative player and team statistics.
 

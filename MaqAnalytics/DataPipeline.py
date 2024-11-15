@@ -35,7 +35,7 @@ class DataPipeline:
         Returns:
             pd.DataFrame: DataFrame containing feature vectors and target variables for all games.
         """
-        date_range = (self.start_date, self.end_date)
+        # date_range = (self.start_date, self.end_date)
 
         # Fetch and process game logs using SavantRetrosheetConverter
         retrosheet_df = self.savant_converter.process_games_retrosheet_with_outcome()
