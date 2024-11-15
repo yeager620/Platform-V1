@@ -6,18 +6,21 @@ from bs_retrosheet_converter import SavantRetrosheetConverter
 
 
 class VectorConstructor:
-    def __init__(self, player_df, sportsbook_scraper: SportsbookReviewScraper, moneylines_df=None):
+    def __init__(self, moneylines_df, stat_df=None, player_df=None):
         """
         Initializes the VectorConstructor with necessary components.
 
         Parameters:
-            player_df (pd.DataFrame): DataFrame containing player statistics.
-            sportsbook_scraper (SportsbookReviewScraper): Instance for scraping SportsBookReview odds data.
             moneylines_df (pd.DataFrame): DataFrame containing historical moneyline data. If None, it will be fetched using the scraper.
+            stat_df (pd.DataFrame): DataFrame containing feature vectors based on player statistics (processed / pipelined)
+            player_df (pd.DataFrame): DataFrame containing player statistics (unprocessed / not pipelined)
         """
+        self.moneylines_df = moneylines_df  # or self.scrape_moneylines()
+        self.stat_df = stat_df
         self.player_df = player_df
-        self.sportsbook_scraper = sportsbook_scraper
-        self.moneylines_df = moneylines_df or self.scrape_moneylines()
+        # self.sportsbook_scraper = sportsbook_scraper
+        self.savant_converter = SavantRetrosheetConverter("01/01/2024")
+
         self.abb_dict = {
             "ARI": "ARI",  # Arizona Diamondbacks
             "ATL": "ATL",  # Atlanta Braves
@@ -96,7 +99,8 @@ class VectorConstructor:
             "F_RF_A", "F_RF_E", "F_RF_DP", "F_RF_TP"
         ]
 
-    def parse_game_details(self, game_json):
+    @staticmethod
+    def parse_game_details(game_json):
         """
         Extracts relevant details from the game JSON.
 
@@ -130,7 +134,7 @@ class VectorConstructor:
         game_date, home_team, away_team = self.parse_game_details(game_json)
 
         # Scrape odds data for the game date
-        odds_df = self.sportsbook_scraper.scrape()
+        odds_df = self.moneylines_df
 
         # Filter odds for the specific game based on teams and date
         game_odds = odds_df[
@@ -146,6 +150,58 @@ class VectorConstructor:
             ]
 
         return game_odds
+
+    @staticmethod
+    def convert_odds_to_numeric(odds):
+        if odds.startswith('+'):
+            return int(odds[1:])
+        elif odds.startswith('-'):
+            return -int(odds[1:])
+        else:
+            return int(odds)
+
+    @staticmethod
+    def calculate_implied_odds(odds):
+        """
+        Calculates the implied probability from moneyline odds.
+
+        Parameters:
+            odds (float): Moneyline odds.
+
+        Returns:
+            float: Implied probability.
+        """
+        if odds > 0:
+            return 100 / (odds + 100)
+        else:
+            return -odds / (-odds + 100)
+
+    def prepare_and_calculate_odds(self):
+        # Standardize team abbreviations and convert odds
+        self.moneylines_df['team'] = self.moneylines_df['team'].map(self.abb_dict)
+        self.moneylines_df['opponent'] = self.moneylines_df['opponent'].map(self.abb_dict)
+        self.moneylines_df['numeric_odds'] = self.moneylines_df['odds'].apply(self.convert_odds_to_numeric)
+
+        # Calculate average odds for each game
+        average_odds = self.moneylines_df.groupby(['date', 'team', 'opponent'])['numeric_odds'].mean().reset_index()
+        average_odds['implied_odds'] = average_odds['numeric_odds'].apply(self.calculate_implied_odds)
+
+        return average_odds
+
+    def match_game_moneylines_pipelined(self):
+        """
+        Matches and appends moneyline odds and their implied probabilities to the stat_df.
+        """
+        # Prepare odds and calculate implied probabilities
+        average_odds = self.prepare_and_calculate_odds()
+
+        # Merge with stat_df
+        merged_df = pd.merge(self.stat_df, average_odds,
+                             left_on=['Game_Date', 'Home_Team_Abbr', 'Away_Team_Abbr'],
+                             right_on=['date', 'team', 'opponent'],
+                             how='left')
+
+        return merged_df
 
     def calculate_average_moneyline(self, moneylines_df):
         """
@@ -171,22 +227,6 @@ class VectorConstructor:
         average_odds['away_team_implied_odds'] = average_odds['odds'].apply(self.calculate_implied_odds)
 
         return average_odds
-
-    @staticmethod
-    def calculate_implied_odds(moneyline):
-        """
-        Calculates the implied probability from moneyline odds.
-
-        Parameters:
-            moneyline (float): Moneyline odds.
-
-        Returns:
-            float: Implied probability.
-        """
-        if moneyline > 0:
-            return 100 / (moneyline + 100)
-        else:
-            return -moneyline / (-moneyline + 100)
 
     @staticmethod
     def extract_team_players(game_json):
@@ -312,7 +352,8 @@ class VectorConstructor:
 
         return feature_vector
 
-    def calculate_weighted_average(self, df: pd.DataFrame, weight_column: str) -> dict:
+    @staticmethod
+    def calculate_weighted_average(df: pd.DataFrame, weight_column: str) -> dict:
         """
         Calculates the weighted average of statistics based on a specified weight column.
 
@@ -343,24 +384,9 @@ class VectorConstructor:
 
         return weighted_avg
 
-    def scrape_moneylines(self):
-        """
-        Scrapes historical moneyline data using the SportsbookReviewScraper.
-
-        Returns:
-            pd.DataFrame: DataFrame containing historical moneyline data.
-        """
-        print("Scraping historical moneyline data from SportsBookReview...")
-        moneylines_df = self.sportsbook_scraper.scrape()
-        print("Moneyline data scraping completed.")
-        return moneylines_df
-
-    async def construct_all_game_vectors(self, date_ranges=None):
+    async def construct_all_game_vectors(self):
         """
         Constructs feature vectors for all games within the specified date ranges.
-
-        Parameters:
-            date_ranges (list of tuples): Each tuple contains (start_date, end_date) in "MM/DD/YYYY" format.
 
         Returns:
             pd.DataFrame: DataFrame containing feature vectors and target variables for all games.

@@ -375,7 +375,7 @@ class BacktestingEngine:
         precision = precision_score(self.y_train, y_train_pred, zero_division=0)
         recall = recall_score(self.y_train, y_train_pred, zero_division=0)
         f1 = f1_score(self.y_train, y_train_pred, zero_division=0)
-        roc_auc = roc_auc_score(self.y_train, self.pipeline.predict_proba(self.X_train)[:,1])
+        roc_auc = roc_auc_score(self.y_train, self.pipeline.predict_proba(self.X_train)[:, 1])
 
         accuracy_metrics = {
             'Accuracy': accuracy,

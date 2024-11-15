@@ -6,3 +6,6 @@ OddsBlaze: https://api.oddsblaze.com/v1
 SportsBookReview: https://www.sportsbookreview.com/betting-odds/mlb-baseball/
 StatsAPI (Schedule): https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate={date}&endDate={date}&fields=dates,date,games,gamePk
 BaseballSavant (Gamelogs): https://baseballsavant.mlb.com/gf?game_pk={game_pk}
+
+Example BaseballSavant Gamelog endpoint/data:
+https://baseballsavant.mlb.com/gf?game_pk=487628

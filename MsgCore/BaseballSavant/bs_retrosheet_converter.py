@@ -6,8 +6,18 @@ import pandas as pd
 from collections import defaultdict
 
 
+def get_current_date():
+    """
+    Retrieves the current date in "MM/DD/YYYY" format.
+
+    Returns:
+        str: Current date as a string.
+    """
+    return datetime.now().strftime("%m/%d/%Y")
+
+
 class SavantRetrosheetConverter:
-    def __init__(self, start_date):
+    def __init__(self, start_date, end_date=get_current_date()):
         """
         Initializes the SavantRetrosheetConverter with a start date.
 
@@ -15,7 +25,7 @@ class SavantRetrosheetConverter:
             start_date (str): The start date in "MM/DD/YYYY" format.
         """
         self.start_date = start_date  # Expected format: "MM/DD/YYYY"
-        self.current_date = self.get_current_date()
+        self.end_date = end_date  # Expected format: "MM/DD/YYYY"
         self.base_schedule_url = (
             "https://statsapi.mlb.com/api/v1/schedule?"
             "sportId=1&startDate={start_date}&endDate={end_date}"
@@ -67,6 +77,7 @@ class SavantRetrosheetConverter:
             "F_RF_G", "F_RF_GS", "F_RF_OUT", "F_RF_TC", "F_RF_PO",
             "F_RF_A", "F_RF_E", "F_RF_DP", "F_RF_TP"
         ]
+        self.gamelogs = self.get_unique_game_jsons()
 
     def reconstruct_retrosheet_row_from_cumulative(self, game_id, game_json, player_key, player_info, is_home,
                                                    cumulative_stats):
@@ -357,10 +368,8 @@ class SavantRetrosheetConverter:
         Returns:
             pd.DataFrame: DataFrame containing concatenated Retrosheet rows for all games.
         """
-        gamelogs = self.get_unique_game_jsons()
-
         # Sort games in chronological order based on gameDate
-        gamelogs_sorted = sorted(gamelogs, key=lambda x: datetime.strptime(x['gameDate'], "%m/%d/%Y"))
+        gamelogs_sorted = sorted(self.gamelogs, key=lambda x: datetime.strptime(x['gameDate'], "%m/%d/%Y"))
 
         retrosheet_rows = []
 
@@ -414,7 +423,7 @@ class SavantRetrosheetConverter:
             concatenated_row = home_retrosheet_row + away_retrosheet_row
 
             # Include Team Names and Abbreviations, and gamePk
-            concatenated_row += [home_team_name, home_team_abbr, away_team_name, away_team_abbr, game_id]
+            concatenated_row += [home_team_name, home_team_abbr, away_team_name, away_team_abbr, game_id, game_date]
 
             retrosheet_rows.append(concatenated_row)
 
@@ -423,7 +432,7 @@ class SavantRetrosheetConverter:
         # Plus 308-312 for Team Names, Abbreviations, and gamePk
         home_columns = [f"Home_Field_{i}" for i in range(154)]
         away_columns = [f"Away_Field_{i}" for i in range(154)]
-        team_info_columns = ['Home_Team_Name', 'Home_Team_Abbr', 'Away_Team_Name', 'Away_Team_Abbr', 'Game_PK']
+        team_info_columns = ['Home_Team_Name', 'Home_Team_Abbr', 'Away_Team_Name', 'Away_Team_Abbr', 'Game_PK', 'Game_Date']
         all_columns = home_columns + away_columns + team_info_columns
 
         # Create DataFrame
@@ -441,10 +450,6 @@ class SavantRetrosheetConverter:
         Returns:
             pd.DataFrame: Updated DataFrame with 'Home_Win' column added.
         """
-        # Ensure that gamelogs are already fetched and stored
-        if not hasattr(self, 'gamelogs') or not self.gamelogs:
-            print("Game logs not found. Fetching game logs first.")
-            self.gamelogs = self.get_unique_game_jsons()
 
         # Create a mapping from gamePk to home team win (1) or loss (0)
         game_outcome = {}
@@ -520,16 +525,6 @@ class SavantRetrosheetConverter:
             if info.get('person', {}).get('id') == player_id:
                 return info
         return None
-
-    @staticmethod
-    def get_current_date():
-        """
-        Retrieves the current date in "MM/DD/YYYY" format.
-
-        Returns:
-            str: Current date as a string.
-        """
-        return datetime.now().strftime("%m/%d/%Y")
 
     def fetch_game_pks(self):
         """
@@ -840,7 +835,8 @@ class SavantRetrosheetConverter:
 
         return retrosheet_row
 
-    def has_cumulative_stats(self, player_cumulative):
+    @staticmethod
+    def has_cumulative_stats(player_cumulative):
         """
         Determines if a player has any cumulative statistics.
 
@@ -1001,4 +997,3 @@ class SavantRetrosheetConverter:
         self.update_cumulative_team_stats(team_id, team_retrosheet_row, cumulative_team_stats)
 
         return team_retrosheet_row
-
