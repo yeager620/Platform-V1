@@ -79,8 +79,8 @@ class SportsbookReviewScraper:
                             'game_url': game_url
                         }
                         records.append(record_team_2)
-            except Exception as e:
-                print(f"Error parsing game data: {e}")
+            except:  # Exception as e:
+                continue  # print(f"Error parsing game data: {e}")
         return records
 
     def scrape(self):
@@ -91,4 +91,3 @@ class SportsbookReviewScraper:
             records = self.parse_page(html, date)
             all_records.extend(records)
         return pd.DataFrame(all_records)
-

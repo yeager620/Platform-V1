@@ -38,9 +38,22 @@ class DataPipeline:
         # date_range = (self.start_date, self.end_date)
 
         # Fetch and process game logs using SavantRetrosheetConverter
+
         retrosheet_df = self.savant_converter.process_games_retrosheet_with_outcome()
 
         moneylines_df = self.moneylines_scraper.scrape()
+
+        with pd.option_context('display.max_rows', None,
+                               'display.max_columns', None,
+                               'display.precision', 3,
+                               ):
+            print(retrosheet_df)
+
+        with pd.option_context('display.max_rows', None,
+                               'display.max_columns', None,
+                               'display.precision', 3,
+                               ):
+            print(moneylines_df)
 
         vector_constructor = VectorConstructor(
             moneylines_df=moneylines_df,
