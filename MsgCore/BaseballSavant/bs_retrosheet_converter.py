@@ -213,7 +213,8 @@ class SavantRetrosheetConverter:
         # Iterate through team_retrosheet_row and update cumulative_team_stats
         for idx, stat_value in enumerate(team_retrosheet_row):
             stat_name = self.retrosheet_field_names[idx]
-            cumulative_team_stats[team_id][stat_name] += stat_value
+            if isinstance(stat_value, (int, float)):
+                cumulative_team_stats[team_id][stat_name] += stat_value
 
     def aggregate_team_retrosheet_stats(self, lineup, game_id, game_json, team_type,
                                         cumulative_player_stats, cumulative_team_stats):
@@ -902,7 +903,9 @@ class SavantRetrosheetConverter:
         team_retrosheet_row[3] = team_retrosheet_row[1]
 
         # Field 4: Team ID
-        team_id = game_json['scoreboard']['teams'][team_type]['team']['id']
+        # 0 used as placeholder for now since not using team_id
+        team_id = 0  # game_json['scoreboard']['linescore'][team_type]['team']['id']
+
         team_retrosheet_row[4] = team_id
 
         # Field 5: Player ID (Using team_id as a placeholder)
@@ -916,8 +919,8 @@ class SavantRetrosheetConverter:
         team_retrosheet_row[8] = 1 if team_type == 'home' else 0
 
         # Field 9: Opponent ID
-        opponent_team_id = game_json['scoreboard']['teams']['away']['team']['id'] if team_type == 'home' else \
-            game_json['scoreboard']['teams']['home']['team']['id']
+        # Use 0 as placeholder for now since not using team_id
+        opponent_team_id = 0  # game_json['scoreboard']['teams']['away']['team']['id'] if team_type == 'home' else game_json['scoreboard']['teams']['home']['team']['id']
         team_retrosheet_row[9] = opponent_team_id
 
         # Field 10: Park ID

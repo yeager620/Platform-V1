@@ -1,8 +1,8 @@
 import pandas as pd
 import asyncio
 from datetime import datetime, timedelta
-from SportsBookReview import SportsbookReviewScraper
-from bs_retrosheet_converter import SavantRetrosheetConverter
+# from SportsBookReview import SportsbookReviewScraper
+# from bs_retrosheet_converter import SavantRetrosheetConverter
 
 
 class VectorConstructor:
@@ -19,7 +19,7 @@ class VectorConstructor:
         self.stat_df = stat_df
         self.player_df = player_df
         # self.sportsbook_scraper = sportsbook_scraper
-        self.savant_converter = SavantRetrosheetConverter("01/01/2024")
+        # self.savant_converter = SavantRetrosheetConverter("01/01/2024")
 
         self.abb_dict = {
             "ARI": "ARI",  # Arizona Diamondbacks
@@ -384,6 +384,8 @@ class VectorConstructor:
 
         return weighted_avg
 
+
+'''
     async def construct_all_game_vectors(self):
         """
         Constructs feature vectors for all games within the specified date ranges.
@@ -433,3 +435,4 @@ class VectorConstructor:
         feature_df = pd.DataFrame(feature_vectors)
 
         return feature_df
+'''

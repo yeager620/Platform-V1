@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
 
 import pandas as pd
-import asyncio
+# import asyncio
 
-from OddsBlaze import OddsBlazeAPI
-from SportsBookReview import SportsbookReviewScraper
-from VectorConstructor import VectorConstructor
-from bs_retrosheet_converter import SavantRetrosheetConverter
+# from OddsBlaze import OddsBlazeAPI
+from MsgCore.SportsBookReview.SportsBookReview import SportsbookReviewScraper
+from MaqAnalytics.VectorConstructor import VectorConstructor
+from MsgCore.BaseballSavant.bs_retrosheet_converter import SavantRetrosheetConverter
 
 
 class DataPipeline:
@@ -23,7 +23,7 @@ class DataPipeline:
             end_date (str): End date for fetching game logs in "MM/DD/YYYY" format.
         """
         self.start_date = start_date
-        self.end_date = start_date
+        self.end_date = end_date
 
         self.savant_converter = SavantRetrosheetConverter(start_date=start_date, end_date=end_date)
         self.moneylines_scraper = SportsbookReviewScraper(start_date=start_date, end_date=end_date)
