@@ -21,38 +21,6 @@ class VectorConstructor:
         # self.sportsbook_scraper = sportsbook_scraper
         # self.savant_converter = SavantRetrosheetConverter("01/01/2024")
 
-        self.abb_dict = {
-            "ARI": "ARI",  # Arizona Diamondbacks
-            "ATL": "ATL",  # Atlanta Braves
-            "BAL": "BAL",  # Baltimore Orioles
-            "BOS": "BOS",  # Boston Red Sox
-            "CHC": "CHN",  # Chicago Cubs
-            "CWS": "CHA",  # Chicago White Sox
-            "CIN": "CIN",  # Cincinnati Reds
-            "CLE": "CLE",  # Cleveland Guardians
-            "COL": "COL",  # Colorado Rockies
-            "DET": "DET",  # Detroit Tigers
-            "HOU": "HOU",  # Houston Astros
-            "KC": "KCA",  # Kansas City Royals
-            "LAA": "ANA",  # Los Angeles Angels
-            "LAD": "LAN",  # Los Angeles Dodgers
-            "MIA": "MIA",  # Miami Marlins
-            "MIL": "MIL",  # Milwaukee Brewers
-            "MIN": "MIN",  # Minnesota Twins
-            "NYM": "NYN",  # New York Mets
-            "NYY": "NYA",  # New York Yankees
-            "OAK": "OAK",  # Oakland Athletics
-            "PHI": "PHI",  # Philadelphia Phillies
-            "PIT": "PIT",  # Pittsburgh Pirates
-            "SD": "SDN",  # San Diego Padres
-            "SF": "SFN",  # San Francisco Giants
-            "SEA": "SEA",  # Seattle Mariners
-            "STL": "SLN",  # St. Louis Cardinals
-            "TB": "TBA",  # Tampa Bay Rays
-            "TEX": "TEX",  # Texas Rangers
-            "TOR": "TOR",  # Toronto Blue Jays
-            "WSH": "WAS"  # Washington Nationals
-        }
         self.retrosheet_field_names = [
             "game_id", "date", "game_number", "appearance_date", "team_id", "player_id",
             "batting_order", "batting_order_sequence", "home_flag", "opponent_id",
@@ -119,37 +87,6 @@ class VectorConstructor:
         away_team_abbr = game_json['scoreboard']['teams']['away']['team']['abbreviation']
 
         return game_date, home_team_abbr, away_team_abbr
-
-    async def fetch_game_odds(self, game_json):
-        """
-        Fetches moneyline odds for a specific game from SportsBookReview.
-
-        Parameters:
-            game_json (dict): JSON data for the game.
-
-        Returns:
-            pd.DataFrame: DataFrame containing moneyline odds for the game.
-        """
-        # Parse game details
-        game_date, home_team, away_team = self.parse_game_details(game_json)
-
-        # Scrape odds data for the game date
-        odds_df = self.moneylines_df
-
-        # Filter odds for the specific game based on teams and date
-        game_odds = odds_df[
-            (odds_df['date'] == game_date) &
-            (
-                    (
-                            self.abb_dict[odds_df['team']] == home_team
-                    ) &
-                    (
-                            self.abb_dict[odds_df['opponent']] == away_team
-                    )
-            )
-            ]
-
-        return game_odds
 
     @staticmethod
     def standardize_team_abbr(abbr):
@@ -226,7 +163,7 @@ class VectorConstructor:
 
         # Remove percentage sign and convert wager_percentage to numeric
         self.moneylines_df['wager_percentage'] = self.moneylines_df['wager_percentage'].str.replace('%', '').astype(
-            float) / 100
+            float)
 
         # Convert odds to numeric
         self.moneylines_df['numeric_odds'] = self.moneylines_df['odds'].apply(self.convert_odds_to_numeric)
@@ -270,6 +207,14 @@ class VectorConstructor:
             team2_avg_implied_odds = team2_rows['implied_odds'].mean()
             team2_avg_wager_percentage = team2_rows['wager_percentage'].mean()
 
+            # **Calculate the bookmaker's vig**
+            sum_implied_odds = team1_avg_implied_odds + team2_avg_implied_odds
+            vig = sum_implied_odds - 1
+
+            # **Adjust implied probabilities to sum to 1**
+            team1_adjusted_implied_odds = team1_avg_implied_odds / sum_implied_odds
+            team2_adjusted_implied_odds = team2_avg_implied_odds / sum_implied_odds
+
             # Create a dictionary for this game
             game_odds = {
                 'game_id': game_id,
@@ -277,11 +222,12 @@ class VectorConstructor:
                 'team1': team1,
                 'team2': team2,
                 'team1_avg_odds': team1_avg_odds,
-                'team1_avg_implied_odds': team1_avg_implied_odds,
+                'team1_avg_implied_odds': team1_adjusted_implied_odds,  # Use adjusted implied odds
                 'team1_avg_wager_percentage': team1_avg_wager_percentage,
                 'team2_avg_odds': team2_avg_odds,
-                'team2_avg_implied_odds': team2_avg_implied_odds,
+                'team2_avg_implied_odds': team2_adjusted_implied_odds,  # Use adjusted implied odds
                 'team2_avg_wager_percentage': team2_avg_wager_percentage,
+                'vig': vig  # Add the vig to the game dictionary
             }
 
             game_odds_list.append(game_odds)
@@ -293,7 +239,7 @@ class VectorConstructor:
 
     def match_game_moneylines_pipelined(self):
         """
-        Matches and appends moneyline odds and their implied probabilities to the stat_df.
+        Matches and appends moneyline odds, their implied probabilities, and the bookmaker's vig to the stat_df.
         """
         # Prepare odds and calculate implied probabilities
         game_odds_df = self.prepare_and_calculate_odds()
@@ -327,7 +273,8 @@ class VectorConstructor:
                     'home_implied_odds': None,
                     'away_implied_odds': None,
                     'home_wager_percentage': None,
-                    'away_wager_percentage': None
+                    'away_wager_percentage': None,
+                    'vig': None
                 })
 
             odds_row = odds_row.iloc[0]
@@ -355,8 +302,12 @@ class VectorConstructor:
                     'home_implied_odds': None,
                     'away_implied_odds': None,
                     'home_wager_percentage': None,
-                    'away_wager_percentage': None
+                    'away_wager_percentage': None,
+                    'vig': None
                 })
+
+            # Include the vig
+            vig = odds_row['vig']
 
             return pd.Series({
                 'home_odds': home_odds,
@@ -364,7 +315,8 @@ class VectorConstructor:
                 'home_implied_odds': home_implied_odds,
                 'away_implied_odds': away_implied_odds,
                 'home_wager_percentage': home_wager_percentage,
-                'away_wager_percentage': away_wager_percentage
+                'away_wager_percentage': away_wager_percentage,
+                'vig': vig
             })
 
         # Apply the function to each row
@@ -555,56 +507,3 @@ class VectorConstructor:
                 weighted_avg[col] = (df[col] * df[weight_column]).sum() / total_weight
 
         return weighted_avg
-
-
-'''
-    async def construct_all_game_vectors(self):
-        """
-        Constructs feature vectors for all games within the specified date ranges.
-
-        Returns:
-            pd.DataFrame: DataFrame containing feature vectors and target variables for all games.
-        """
-        # Initialize the game logs fetching class
-        retrosheet_df = self.savant_converter.process_games_retrosheet_with_outcome()
-
-        # Iterate over each game in retrosheet_df and construct feature vectors
-        feature_vectors = []
-        for _, row in retrosheet_df.iterrows():
-            game_id = row['game_id']
-            game_json = self.savant_converter.fetch_gamelog(game_id)
-            if not game_json:
-                print(f"Game JSON for game_id {game_id} not found. Skipping.")
-                continue
-
-            # Extract player IDs and fetch their stats up to the game date
-            player_ids = self.extract_team_players(game_json)
-            game_date = row['date']
-            player_data_timeframe = datetime.strptime(game_date, '%Y-%m-%d') - timedelta(days=365)  # 1 year before game
-            home_batters_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['home_batters'])
-            home_pitcher_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['home_pitchers'])
-            away_batters_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['away_batters'])
-            away_pitcher_df = self.fetch_player_stats(player_data_timeframe, game_date, player_ids['away_pitchers'])
-
-            # Fetch and integrate moneyline data
-            moneylines_df = await self.fetch_game_odds(game_json)
-            moneylines_df = self.calculate_average_moneyline(moneylines_df)
-
-            # Construct game vector
-            game_vector = self.construct_game_vector(
-                game_json=game_json,
-                home_batters_df=home_batters_df,
-                home_pitcher_df=home_pitcher_df,
-                away_batters_df=away_batters_df,
-                away_pitcher_df=away_pitcher_df,
-                moneylines_df=moneylines_df
-            )
-
-            if game_vector:
-                feature_vectors.append(game_vector)
-
-        # Combine all feature vectors into a single DataFrame
-        feature_df = pd.DataFrame(feature_vectors)
-
-        return feature_df
-'''
