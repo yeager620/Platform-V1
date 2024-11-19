@@ -226,7 +226,7 @@ class VectorConstructor:
 
         # Remove percentage sign and convert wager_percentage to numeric
         self.moneylines_df['wager_percentage'] = self.moneylines_df['wager_percentage'].str.replace('%', '').astype(
-            float)
+            float) / 100
 
         # Convert odds to numeric
         self.moneylines_df['numeric_odds'] = self.moneylines_df['odds'].apply(self.convert_odds_to_numeric)
