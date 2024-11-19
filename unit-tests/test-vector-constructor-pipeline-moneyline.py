@@ -1,10 +1,10 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from datetime import datetime
 import pandas as pd
 
 # Assuming the DataPipeline class is defined in data_pipeline.py
-from MaqAnalytics.DataPipeline import DataPipeline
+from MaqAnalytics.VectorConstructor.DataPipeline import DataPipeline
 
 
 class TestDataPipeline(unittest.TestCase):
