@@ -27,6 +27,9 @@ class TestDataPipeline(unittest.TestCase):
                                ):
             print(result_df)
 
+        result_df.to_csv("/Users/yeager/Desktop/Maquoketa-Platform-V1/unit-tests/test_game_vector_df_2023-06-20.csv",
+                         index=False, mode='w')
+
     # TODO: Implement actual unit test -- below is example implementaion
     def test_process_games_single_day(self):
         # Define the test date
