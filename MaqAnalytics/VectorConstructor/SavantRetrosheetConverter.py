@@ -257,7 +257,7 @@ class SavantRetrosheetConverter:
         self.gamelogs = self.get_unique_game_jsons()
 
     def reconstruct_retrosheet_row_from_cumulative(self, game_id, game_json, player_key, player_info, is_home,
-                                                   cumulative_stats):
+                                                   cumulative_stats, live=False):
         """
         Reconstructs a Retrosheet statistics row for a single player based on cumulative stats.
 
@@ -326,6 +326,8 @@ class SavantRetrosheetConverter:
         # Subtract current game stats from cumulative season stats to avoid lookahead bias
         def get_adjusted_stats(stat_map, season_stats, game_stats):
             adjusted_stats = {}
+            if live:  # Default to season stats if predicting upcoming game
+                adjusted_stats = season_stats
             for stat_key in stat_map.keys():
                 season_stat = season_stats.get(stat_key, 0)
                 game_stat = game_stats.get(stat_key, 0)
