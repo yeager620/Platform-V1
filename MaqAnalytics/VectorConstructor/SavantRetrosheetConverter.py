@@ -256,199 +256,165 @@ class SavantRetrosheetConverter:
         ]
         self.gamelogs = self.get_unique_game_jsons()
 
-    def reconstruct_retrosheet_row_from_cumulative(self, game_id, game_json, player_key, player_info, is_home,
-                                                   cumulative_stats, live=False):
+    def reconstruct_player_stats(self, game_id, game_json, player_info, is_home, is_pitcher=False, live=False):
         """
-        Reconstructs a Retrosheet statistics row for a single player based on cumulative stats.
+        Reconstructs a statistics dictionary for a single player based on season stats.
 
         Parameters:
             game_id (str): Unique identifier for the game.
             game_json (dict): JSON data for the game.
-            player_key (str): Player identifier (e.g., "ID451594").
             player_info (dict): Player information from the JSON.
             is_home (bool): Flag indicating if the player is on the home team.
-            cumulative_stats (dict): Cumulative statistics for the player up to previous games.
+            is_pitcher (bool): Indicated player is a pitcher
+            live (bool): Indicates live prediction
 
         Returns:
-            list: A list representing the Retrosheet statistics row with numeric values based on cumulative stats.
+            dict: A dictionary representing the Retrosheet statistics with keys as stat names.
         """
-        # Initialize a list with 154 default numeric values (zeros)
-        retrosheet_row = [0] * 154
+        # print(f"Reconstructing stats for player: {player_info.get('person', {}).get('id', 'Unknown')}")
+        # print(f"Season stats: {player_info.get('seasonStats', {})}")
+        # print(f"This game stats: {player_info.get('stats', {})}")
+        # Initialize a dictionary to hold all stats
+        stats_dict = {}
 
-        # Field 0: Game ID
-        retrosheet_row[0] = game_id
+        position_abb = player_info.get('position', {}).get('abbreviation', 'None')
 
-        # Field 1: Date (YYYY-MM-DD)
+        # Basic Fields
+        stats_dict['game_id'] = game_id
         game_date = game_json.get('gameDate', '')
         try:
             # Convert from "MM/DD/YYYY" to "YYYY-MM-DD"
             parsed_date = datetime.strptime(game_date, "%m/%d/%Y").strftime('%Y-%m-%d')
-            retrosheet_row[1] = parsed_date
         except:
-            retrosheet_row[1] = '1970-01-01'  # Default to a valid date string if parsing fails
+            parsed_date = '1970-01-01'  # Default date if parsing fails
+        stats_dict['date'] = parsed_date
+        stats_dict['game_number'] = game_json.get('gameNumber', 0)
+        stats_dict['appearance_date'] = parsed_date
+        stats_dict['team_id'] = player_info.get('parentTeamId', 0)
+        stats_dict['player_id'] = player_info.get('person', {}).get('id', 0)
+        stats_dict['batting_order'] = 0  # Placeholder
+        stats_dict['batting_order_sequence'] = 0  # Placeholder
+        stats_dict['home_flag'] = 1 if is_home else 0
 
-        # Field 2: Game number (0 = no double header)
-        retrosheet_row[2] = game_json.get('gameNumber', 0)
-
-        # Field 3: Appearance date (same as date)
-        retrosheet_row[3] = retrosheet_row[1]
-
-        # Field 4: Team ID
-        retrosheet_row[4] = player_info.get('parentTeamId', 0)
-
-        # Field 5: Player ID
-        retrosheet_row[5] = player_info.get('person', {}).get('id', 0)
-
-        # Field 6: Player slot in batting order (use cumulative average if available)
-        retrosheet_row[6] = cumulative_stats.get('batting_order', 0)
-
-        # Field 7: Sequence in batting order slot (use cumulative average if available)
-        retrosheet_row[7] = cumulative_stats.get('batting_order_sequence', 0)
-
-        # Field 8: Home flag (1 if home, 0 if away)
-        retrosheet_row[8] = 1 if is_home else 0
-
-        # Field 9: Opponent ID
+        # Opponent ID
         home_team_id = game_json['boxscore']['teams']['home']['team']['id']
         away_team_id = game_json['boxscore']['teams']['away']['team']['id']
         opponent_id = away_team_id if is_home else home_team_id
-        retrosheet_row[9] = opponent_id
+        stats_dict['opponent_id'] = opponent_id
 
-        # Field 10: Park ID (use cumulative or default if not available)
-        retrosheet_row[10] = game_json.get('park', {}).get('id', 0)
+        # Park ID
+        stats_dict['park_id'] = game_json.get('park', {}).get('id', 0)
 
-        # Get Batting, Pitching, and Fielding stats from current game
-        '''
-        batting_stats_curr = player_info.get('stats', {}).get('batting', {})
-        pitching_stats_curr = player_info.get('stats', {}).get('pitching', {})
-        fielding_stats_curr = player_info.get('stats', {}).get('fielding', {})
-        '''
-        # Subtract current game stats from cumulative season stats to avoid lookahead bias
+        # Helper function to adjust stats
         def get_adjusted_stats(stat_map, season_stats, game_stats):
+            """
+            Adjusts cumulative stats by subtracting game stats from season stats.
+
+            Parameters:
+                stat_map (dict): Mapping of stat keys to their field names.
+                season_stats (dict): Season-level statistics for the player.
+                game_stats (dict): Game-level statistics for the player.
+
+            Returns:
+                dict: Adjusted statistics.
+            """
             adjusted_stats = {}
-            if live:  # Default to season stats if predicting upcoming game
-                adjusted_stats = season_stats
             for stat_key in stat_map.keys():
+                # Retrieve the stats, defaulting to 0 if not found
                 season_stat = season_stats.get(stat_key, 0)
                 game_stat = game_stats.get(stat_key, 0)
+
+                # Convert to numeric values, defaulting to 0 for invalid entries
+                try:
+                    season_stat = float(season_stat)
+                except (ValueError, TypeError):
+                    season_stat = 0
+
+                try:
+                    game_stat = float(game_stat)
+                except (ValueError, TypeError):
+                    game_stat = 0
+
+                # Perform subtraction
                 adjusted_stats[stat_key] = season_stat - game_stat
+
             return adjusted_stats
 
-        # Batting stats
+        # Batting Stats
         season_batting = player_info.get('seasonStats', {}).get('batting', {})
         game_batting = player_info.get('stats', {}).get('batting', {})
         adjusted_batting_stats = get_adjusted_stats(BATTING_STAT_MAP, season_batting, game_batting)
 
-        # --- Batting Stats (Fields 11-35) ---
+        # Populate Batting Stats
         for stat_key, retrosheet_field in BATTING_STAT_MAP.items():
-            if retrosheet_field in self.retrosheet_field_names:
-                field_index = self.retrosheet_field_names.index(retrosheet_field)
-                value = adjusted_batting_stats.get(stat_key, 0)
-                # Convert to appropriate type
-                if isinstance(value, str):
-                    try:
-                        # Handle average and percentage fields
-                        if value.startswith('.'):
-                            value = float('0' + value)
-                        else:
-                            value = float(value)
-                    except:
-                        value = 0
-                elif isinstance(value, (int, float)):
-                    pass
-                else:
-                    value = 0
-                retrosheet_row[field_index] = value
+            value = adjusted_batting_stats.get(stat_key, 0)
+            stats_dict[f"B_{stat_key}"] = value
 
-        # Handle B_G_DH (Field 33)
-        # Assuming 'battingOrder' indicates 'DH' usage
-        # batting_order_field = player_info.get('battingOrder', '')
-
-        '''
-        if isinstance(batting_order_field, str) and batting_order_field.upper() == 'DH':
-            retrosheet_row[33] = 1
-        else:
-            retrosheet_row[33] = 0
-        '''
-
-        # Pitching stats
+        # Pitching Stats
         season_pitching = player_info.get('seasonStats', {}).get('pitching', {})
         game_pitching = player_info.get('stats', {}).get('pitching', {})
         adjusted_pitching_stats = get_adjusted_stats(PITCHING_STAT_MAP, season_pitching, game_pitching)
 
-        # --- Pitching Stats (Fields 36-74) ---
+        # Populate Pitching Stats
         for stat_key, retrosheet_field in PITCHING_STAT_MAP.items():
-            if retrosheet_field in self.retrosheet_field_names:
-                field_index = self.retrosheet_field_names.index(retrosheet_field)
-                value = adjusted_pitching_stats.get(stat_key, 0)
-                # Special handling for inningsPitched -> P_OUT (Field 44)
-                if stat_key == 'inningsPitched' and 'P_OUT' in self.retrosheet_field_names:
-                    try:
-                        innings = float(value)
-                        whole_innings = int(innings)
-                        fractional = innings - whole_innings
-                        outs_recorded = whole_innings * 3 + int(round(fractional * 10 / 3))
-                    except:
-                        outs_recorded = 0
-                    retrosheet_row[field_index] = outs_recorded
-                    continue  # Skip default assignment
+            value = adjusted_pitching_stats.get(stat_key, 0)
+            # Special handling for 'inningsPitched' -> 'P_OUT'
+            stats_dict[f"P_{stat_key}"] = value
 
-                # Convert to appropriate type
-                if isinstance(value, str):
-                    try:
-                        # Handle average and percentage fields
-                        if value.startswith('.'):
-                            value = float('0' + value)
-                        else:
-                            value = float(value)
-                    except:
-                        value = 0
-                elif isinstance(value, (int, float)):
-                    pass
-                else:
-                    value = 0
-                retrosheet_row[field_index] = value
-
-        # Handle P_OUT (Field 44) if not already set
-        if 'P_OUT' in PITCHING_STAT_MAP.values():
-            field_index = self.retrosheet_field_names.index('P_OUT')
-            if retrosheet_row[field_index] == 0:
-                innings_pitched = adjusted_pitching_stats.get('inningsPitched', '0.0')
-                try:
-                    innings = float(innings_pitched)
-                    whole_innings = int(innings)
-                    fractional = innings - whole_innings
-                    outs_recorded = whole_innings * 3 + int(round(fractional * 10 / 3))
-                except:
-                    outs_recorded = 0
-                retrosheet_row[field_index] = outs_recorded
-
-        # Fielding stats
+        # Fielding Stats
         position_abbr = player_info.get('position', {}).get('abbreviation', '').upper()
         season_fielding = player_info.get('seasonStats', {}).get('fielding', {})
         game_fielding = player_info.get('stats', {}).get('fielding', {})
-        adjusted_fielding_stats = get_adjusted_stats(FIELDING_STAT_MAP.get(position_abbr, {}), season_fielding,
-                                                     game_fielding)
+        fielding_map = FIELDING_STAT_MAP.get(position_abbr, {})
+        adjusted_fielding_stats = get_adjusted_stats(fielding_map, season_fielding, game_fielding)
 
-        # --- Fielding Stats (Fields 75-153) ---
-        position_abbr = player_info.get('position', {}).get('abbreviation', '').upper()
-        if position_abbr in FIELDING_STAT_MAP:
-            position_map = FIELDING_STAT_MAP[position_abbr]
-            for stat_key, retrosheet_field in position_map.items():
-                if retrosheet_field in self.retrosheet_field_names:
-                    field_index = self.retrosheet_field_names.index(retrosheet_field)
-                    value = adjusted_fielding_stats.get(stat_key, 0)
-                    # Convert to appropriate type
-                    if isinstance(value, (int, float)):
-                        pass
-                    else:
-                        value = 0
-                    retrosheet_row[field_index] = value
+        # Populate Fielding Stats
+        for stat_key, retrosheet_field in fielding_map.items():
+            value = adjusted_fielding_stats.get(stat_key, 0)
+            stats_dict[f"F_{stat_key}"] = value
+
+        # Normalize stats by games played to get per-game averages
+        if position_abb == 'P':
+            try:
+                games_played = int(player_info.get('seasonStats', {}).get('pitching', {}).get('gamesPlayed', 1)) - 1
+            except (ValueError, TypeError):
+                games_played = 1  # Fallback to avoid division by zero or invalid value
+
+            try:
+                season_innings_pitched = float(
+                    player_info.get('seasonStats', {}).get('pitching', {}).get('inningsPitched', 0))
+                game_innings_pitched = float(player_info.get('stats', {}).get('pitching', {}).get('inningsPitched', 0))
+                innings_pitched = season_innings_pitched - game_innings_pitched
+            except (ValueError, TypeError):
+                innings_pitched = 0  # Fallback for invalid innings values
         else:
-            # If position is not recognized, skip fielding stats
-            pass
+            try:
+                games_played = int(player_info.get('seasonStats', {}).get('batting', {}).get('gamesPlayed', 1)) - 1
+            except (ValueError, TypeError):
+                games_played = 1  # Fallback to avoid division by zero or invalid value
 
-        return retrosheet_row
+            innings_pitched = 0  # Not applicable for non-pitchers
+
+        if games_played <= 0:
+            print(f"Warning: gamesPlayed is {games_played} for player {stats_dict['player_id']}. Defaulting to 1.")
+
+            games_played = 1  # Avoid division by zero
+
+        # Normalize Batting Stats
+        for stat_key in BATTING_STAT_MAP.keys():
+            stats_dict[f"B_{stat_key}"] /= games_played
+
+        # Normalize Pitching Stats
+        for stat_key in PITCHING_STAT_MAP.keys():
+            stats_dict[f"P_{stat_key}"] /= games_played
+
+        # Normalize Fielding Stats
+        for stat_key in fielding_map.keys():
+            stats_dict[f"F_{stat_key}"] /= games_played
+
+        print(f"Reconstructed stats for player {stats_dict['player_id']}: {stats_dict}")
+
+        return stats_dict
 
     def update_cumulative_stats_after_game(self, game_json, home_lineup, away_lineup,
                                            cumulative_player_stats, cumulative_team_stats):
@@ -542,6 +508,11 @@ class SavantRetrosheetConverter:
         num_batters = 0
         num_pitchers = 0
 
+        if starting_pitcher not in starting_batters:
+            starting_lineup = starting_batters + [starting_pitcher]
+        else:
+            starting_lineup = starting_batters
+
         # Determine if there is a DH in the lineup
         has_dh = False
         for player_id in starting_batters:
@@ -553,7 +524,7 @@ class SavantRetrosheetConverter:
                 has_dh = True
                 break  # No need to continue once a DH is found
 
-        for player_id in starting_batters:
+        for player_id in starting_lineup:
             player_info = self.get_player_info(player_id, game_json, team_type)
             if player_info is None:
                 print(f"Player info not found for player_id {player_id} in team {team_type}")
@@ -564,8 +535,7 @@ class SavantRetrosheetConverter:
                 game_id=game_id,
                 game_json=game_json,
                 player_info=player_info,
-                is_home=(team_type == 'home'),
-                cumulative_stats=cumulative_player_stats[player_id]
+                is_home=(team_type == 'home')
             )
 
             # Determine if player is a pitcher
@@ -573,22 +543,23 @@ class SavantRetrosheetConverter:
 
             # Determine if player is a batter
             if has_dh:
-                # If there is a DH, the pitcher is not a batter
+                # POSSIBLY INCORRECT: If there is a DH, the pitcher is not a batter
+                print("Starting lineup has DH")
                 is_batter = not is_pitcher
             else:
-                # If there is no DH, all players are batters
-                is_batter = True
+                # POSSIBLY INCORRECT: If there is no DH, all players are batters
+                is_batter = not is_pitcher
 
             # Aggregate Batting Stats
             if is_batter:
                 num_batters += 1
                 for stat in BATTING_STAT_MAP.keys():
-                    aggregated_stats[stat] += player_stats.get(stat, 0)
+                    aggregated_stats[f"B_{stat}"] += player_stats.get(f"B_{stat}", 0)
 
                 # Aggregate Fielding Stats
                 if position_abbr in FIELDING_STAT_MAP:
                     for stat in FIELDING_STAT_MAP[position_abbr].keys():
-                        aggregated_stats[stat] += player_stats.get(stat, 0)
+                        aggregated_stats[f"F_{stat}"] += player_stats.get(f"F_{stat}", 0)
                 else:
                     if position_abbr != 'DH':  # DH doesn't have fielding stats
                         print(f"Unrecognized position {position_abbr} for player_id {player_id}")
@@ -597,79 +568,30 @@ class SavantRetrosheetConverter:
             if is_pitcher:
                 num_pitchers += 1
                 for stat in PITCHING_STAT_MAP.keys():
-                    aggregated_stats[stat] += player_stats.get(stat, 0)
+                    aggregated_stats[f"P_{stat}"] += player_stats.get(f"P_{stat}", 0)
 
         # Normalize Batting Stats
         if num_batters > 0:
             for stat in BATTING_STAT_MAP.keys():
-                aggregated_stats[stat] /= num_batters
+                aggregated_stats[f"B_{stat}"] /= num_batters
 
         # Normalize Pitching Stats
         if num_pitchers > 0:
             for stat in PITCHING_STAT_MAP.keys():
-                aggregated_stats[stat] /= num_pitchers
+                aggregated_stats[f"P_{stat}"] /= num_pitchers
 
         # Normalize Fielding Stats
         num_fielders = num_batters  # Fielders have the same number as batters (excluding DH)
         if num_fielders > 0:
             for position in FIELDING_STAT_MAP.keys():
                 for stat in FIELDING_STAT_MAP[position].keys():
-                    if stat in aggregated_stats:
-                        aggregated_stats[stat] /= num_fielders
+                    if f"F_{stat}" in aggregated_stats:
+                        aggregated_stats[f"F_{stat}"] /= num_fielders
 
         # Convert defaultdict to regular dict
         aggregated_stats = dict(aggregated_stats)
 
         return aggregated_stats
-
-    @staticmethod
-    def reconstruct_player_stats(game_id, game_json, player_info, is_home, cumulative_stats):
-        """
-        Reconstructs a player's statistics based on cumulative stats.
-
-        Parameters:
-            game_id (str): Unique identifier for the game.
-            game_json (dict): JSON data for the game.
-            player_info (dict): Player information from the JSON.
-            is_home (bool): Indicates if the player is on the home team.
-            cumulative_stats (dict): Cumulative statistics for the player up to previous games.
-
-        Returns:
-            dict: A dictionary containing the player's statistics.
-        """
-        player_stats = {}
-
-        # Batting Stats
-        season_batting = player_info.get('seasonStats', {}).get('batting', {})
-        for key in BATTING_STAT_MAP.keys():
-            player_stats[key] = season_batting.get(key, 0)
-
-        # Pitching Stats
-        season_pitching = player_info.get('seasonStats', {}).get('pitching', {})
-        for key in PITCHING_STAT_MAP.keys():
-            if key == 'inningsPitched':
-                innings = season_pitching.get(key, 0.0)
-                try:
-                    whole_innings = int(innings)
-                    fractional = innings - whole_innings
-                    outs_recorded = whole_innings * 3 + int(round(fractional * 10 / 3))
-                    player_stats[key] = outs_recorded / 3  # Convert back to innings pitched
-                except:
-                    player_stats[key] = 0
-            else:
-                player_stats[key] = season_pitching.get(key, 0)
-
-        # Fielding Stats
-        position_abbr = player_info.get('position', {}).get('abbreviation', '').upper()
-        if position_abbr in FIELDING_STAT_MAP:
-            season_fielding = player_info.get('seasonStats', {}).get('fielding', {})
-            for key in FIELDING_STAT_MAP[position_abbr].keys():
-                player_stats[key] = season_fielding.get(key, 0)
-        else:
-            print(
-                f"Unrecognized position {position_abbr} for player_id {player_info.get('person', {}).get('id', 'Unknown')}")
-
-        return player_stats
 
     @staticmethod
     def initialize_cumulative_stats():
@@ -684,89 +606,6 @@ class SavantRetrosheetConverter:
         cumulative_player_stats = defaultdict(lambda: defaultdict(float))
         cumulative_team_stats = defaultdict(lambda: defaultdict(float))
         return cumulative_player_stats, cumulative_team_stats
-
-    @staticmethod
-    def reconstruct_retrosheet_row(game_id, game_json, player_key, player_info, is_home):
-        """
-        Reconstructs a Retrosheet statistics row for a single player in a game using seasonStats.
-
-        Parameters:
-            game_id (str): Unique identifier for the game.
-            game_json (dict): JSON data for the game.
-            player_key (str): Player identifier (e.g., "ID451594").
-            player_info (dict): Player information from the JSON.
-            is_home (bool): Flag indicating if the player is on the home team.
-
-        Returns:
-            list: A list representing the Retrosheet statistics row with numeric values.
-        """
-        retrosheet_row = [0] * 154  # Initialize with 154 default numeric values (zeros)
-
-        # Field assignments
-        retrosheet_row[0] = game_id  # Game ID
-        retrosheet_row[1] = datetime.strptime(game_json.get('gameDate', '1970-01-01'), "%Y-%m-%d").strftime(
-            '%Y-%m-%d')  # Date
-        retrosheet_row[2] = game_json.get('gameNumber', 0)  # Game number
-        retrosheet_row[3] = retrosheet_row[1]  # Appearance date
-        retrosheet_row[4] = player_info.get('parentTeamId', 0)  # Team ID
-        retrosheet_row[5] = player_info.get('person', {}).get('id', 0)  # Player ID
-        retrosheet_row[6] = int(player_info.get('battingOrder', '0'))  # Batting order
-        retrosheet_row[7] = int(player_info.get('battingOrderSequence', '0'))  # Batting order sequence
-        retrosheet_row[8] = 1 if is_home else 0  # Home flag
-        home_team_id = game_json['scoreboard']['teams']['home']['team']['id']
-        away_team_id = game_json['scoreboard']['teams']['away']['team']['id']
-        retrosheet_row[9] = away_team_id if is_home else home_team_id  # Opponent ID
-        retrosheet_row[10] = game_json.get('park', {}).get('id', 0)  # Park ID
-
-        # Normalization variables
-        games_played = player_info.get('seasonStats', {}).get('batting', {}).get('gamesPlayed', 1)
-        games_pitched = player_info.get('seasonStats', {}).get('pitching', {}).get('gamesPlayed', 1)
-        innings_pitched = float(player_info.get('seasonStats', {}).get('pitching', {}).get('inningsPitched', '0.0'))
-
-        # Batting stats (normalized to per game)
-        batting_stats = player_info.get('seasonStats', {}).get('batting', {})
-        for idx, key in enumerate(['gamesPlayed', 'plateAppearances', 'atBats', 'runs', 'hits', 'totalBases', 'doubles',
-                                   'triples', 'homeRuns', 'grandSlams', 'rbi', 'gameWinningRbi', 'baseOnBalls',
-                                   'intentionalWalks', 'strikeOuts', 'groundIntoDoublePlay', 'hitByPitch', 'sacBunts',
-                                   'sacFlies', 'stolenBases', 'caughtStealing', 'catchersInterference'], start=11):
-            retrosheet_row[idx] = batting_stats.get(key, 0) / games_played
-
-        # DH, PH, PR participation
-        retrosheet_row[33] = 1 if 'DH' in player_info.get('battingOrder', '') else 0
-        retrosheet_row[34] = batting_stats.get('gamesAsPH', 0) / games_played
-        retrosheet_row[35] = batting_stats.get('gamesAsPR', 0) / games_played
-
-        # Pitching stats (normalized to per inning)
-        pitching_stats = player_info.get('seasonStats', {}).get('pitching', {})
-        for idx, key in enumerate(['gamesPlayed', 'gamesStarted', 'completeGames', 'shutouts', 'gamesFinished', 'wins',
-                                   'losses', 'saves', 'outs', 'battersFaced', 'atBats', 'runs', 'earnedRuns', 'hits',
-                                   'totalBases', 'doubles', 'triples', 'homeRuns', 'grandSlamsAllowed', 'walks',
-                                   'intentionalWalks', 'strikeOuts', 'groundIntoDoublePlay', 'hitBatsmen',
-                                   'sacHitsAgainst',
-                                   'sacFliesAgainst', 'reachedOnInterference', 'wildPitches', 'balks',
-                                   'inheritedRunners',
-                                   'inheritedRunnersScored', 'groundOuts', 'airOuts', 'numberOfPitches', 'strikes'],
-                                  start=36):
-            if innings_pitched:
-                # TODO: Address edge case where pitcher has no available seasonStats -- Use available team pitching stats
-                retrosheet_row[idx] = pitching_stats.get(key, 0) / innings_pitched
-            else:
-                retrosheet_row[idx] = 0  # Placeholder: change to use team season stats
-
-        # Fielding stats (normalized to opportunities)
-        fielding_stats = player_info.get('seasonStats', {}).get('fielding', {})
-        position_abbr = player_info.get('position', {}).get('abbreviation', '').upper()
-        fielding_map = {
-            'P': 75, 'C': 84, '1B': 95, '2B': 104, '3B': 113, 'SS': 122, 'LF': 131, 'CF': 140, 'RF': 149
-        }
-        if position_abbr in fielding_map:
-            base_idx = fielding_map[position_abbr]
-            for idx, key in enumerate(
-                    ['games', 'gamesStarted', 'outsRecorded', 'totalChances', 'putOuts', 'assists', 'errors',
-                     'doublePlays', 'triplePlays', 'passedBalls', 'catchersInterference'], start=base_idx):
-                retrosheet_row[idx] = fielding_stats.get(key, 0) / games_played
-
-        return retrosheet_row
 
     @staticmethod
     def has_cumulative_stats(player_cumulative):
@@ -829,7 +668,8 @@ class SavantRetrosheetConverter:
                 return [
                     batter_id
                     for batter_id in batter_ids
-                    if game_json['boxscore']['teams'][team]['players'][f"ID{batter_id}"]['stats']['fielding'].get('gamesStarted', 0) >= 1
+                    if game_json['boxscore']['teams'][team]['players'][f"ID{batter_id}"]['stats']['fielding'].get(
+                        'gamesStarted', 0) >= 1
                 ]
 
             # Filter home and away batters
