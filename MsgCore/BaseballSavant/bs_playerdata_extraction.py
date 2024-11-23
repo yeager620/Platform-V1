@@ -65,7 +65,7 @@ class bs_playerdata_extraction:
         Returns:
             dict or None: Player information dictionary or None if not found.
         """
-        team_players = game_json['boxscore']['teams'][team_type].get('players', {})
+        team_players = game_json['boxscore']['teams.json'][team_type].get('players', {})
         for pid, info in team_players.items():
             if info.get('person', {}).get('id') == player_id:
                 return info

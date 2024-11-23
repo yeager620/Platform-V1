@@ -84,8 +84,8 @@ class OddsMatchingEngine:
         game_date = datetime.strptime(game_date_str, "%Y-%m-%dT%H:%M:%SZ").strftime('%Y-%m-%d')
 
         # Extract team abbreviations
-        home_team_abbr = game_json['scoreboard']['teams']['home']['team']['abbreviation']
-        away_team_abbr = game_json['scoreboard']['teams']['away']['team']['abbreviation']
+        home_team_abbr = game_json['scoreboard']['teams.json']['home']['team']['abbreviation']
+        away_team_abbr = game_json['scoreboard']['teams.json']['away']['team']['abbreviation']
 
         return game_date, home_team_abbr, away_team_abbr
 
@@ -191,15 +191,15 @@ class OddsMatchingEngine:
             date = group['date'].iloc[0]
             teams = group['team'].unique()
             if len(teams) != 2:
-                # Skip games that don't have two teams
+                # Skip games that don't have two teams.json
                 continue
             team1, team2 = teams
 
-            # Get data for both teams
+            # Get data for both teams.json
             team1_rows = group[group['team'] == team1]
             team2_rows = group[group['team'] == team2]
 
-            # Calculate averages across sportsbooks for both teams
+            # Calculate averages across sportsbooks for both teams.json
             team1_avg_odds = team1_rows['numeric_odds'].mean()
             team1_avg_implied_odds = team1_rows['implied_odds'].mean()
             team1_avg_wager_percentage = team1_rows['wager_percentage'].mean()
@@ -330,7 +330,7 @@ class OddsMatchingEngine:
 
     def calculate_average_moneyline(self, moneylines_df):
         """
-        Calculates the average moneyline odds for home and away teams.
+        Calculates the average moneyline odds for home and away teams.json.
 
         Parameters:
             moneylines_df (pd.DataFrame): DataFrame containing moneyline data for a specific game.
@@ -344,7 +344,7 @@ class OddsMatchingEngine:
         # Drop rows with NaN odds
         moneylines_df = moneylines_df.dropna(subset=['odds'])
 
-        # Calculate average odds for home and away teams
+        # Calculate average odds for home and away teams.json
         average_odds = moneylines_df.groupby(['team', 'opponent'])['odds'].mean().reset_index()
 
         # Calculate implied probabilities
@@ -356,7 +356,7 @@ class OddsMatchingEngine:
     @staticmethod
     def extract_team_players(game_json):
         """
-        Extracts player IDs for home and away teams, segregating batters and pitchers.
+        Extracts player IDs for home and away teams.json, segregating batters and pitchers.
 
         Parameters:
             game_json (dict): JSON data for the game.
@@ -369,7 +369,7 @@ class OddsMatchingEngine:
         away_batters = []
         away_pitchers = []
 
-        players = game_json['boxscore']['teams']['home'].get('players', {})
+        players = game_json['boxscore']['teams.json']['home'].get('players', {})
         for player_key, player_info in players.items():
             position = player_info.get('position', {}).get('code', '')
             player_id = player_info.get('person', {}).get('id')
@@ -378,7 +378,7 @@ class OddsMatchingEngine:
             else:
                 home_batters.append(player_id)
 
-        players = game_json['boxscore']['teams']['away'].get('players', {})
+        players = game_json['boxscore']['teams.json']['away'].get('players', {})
         for player_key, player_info in players.items():
             position = player_info.get('position', {}).get('code', '')
             player_id = player_info.get('person', {}).get('id')
@@ -471,8 +471,8 @@ class OddsMatchingEngine:
         feature_vector['away_team_implied_odds'] = moneylines_df['away_team_implied_odds'].iloc[0]
 
         # Target variable
-        home_team_score = game_json['scoreboard']['teams']['home']['score']
-        away_team_score = game_json['scoreboard']['teams']['away']['score']
+        home_team_score = game_json['scoreboard']['teams.json']['home']['score']
+        away_team_score = game_json['scoreboard']['teams.json']['away']['score']
         feature_vector['home_team_won'] = 1 if home_team_score > away_team_score else 0
 
         return feature_vector

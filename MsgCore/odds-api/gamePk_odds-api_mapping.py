@@ -41,8 +41,8 @@ class GameMapper:
             if response.status_code != 200:
                 raise HTTPException(status_code=response.status_code, detail=response.text)
             game_data = response.json()
-            home_team = game_data['scoreboard']['teams']['home']['team']['name']
-            away_team = game_data['scoreboard']['teams']['away']['team']['name']
+            home_team = game_data['scoreboard']['teams.json']['home']['team']['name']
+            away_team = game_data['scoreboard']['teams.json']['away']['team']['name']
             commence_time = game_data['gameDate']
 
             sport_id = "baseball_mlb"  # Hardcoded for MLB games

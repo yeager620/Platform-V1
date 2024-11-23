@@ -416,77 +416,24 @@ class SavantRetrosheetConverter:
 
         return stats_dict
 
-    def update_cumulative_stats_after_game(self, game_json, home_lineup, away_lineup,
-                                           cumulative_player_stats, cumulative_team_stats):
+    def process_games_retrosheet_with_outcome(self):
         """
-        Updates cumulative statistics for all players and teams after processing a game.
+        Processes all games in chronological order, constructs the Retrosheet DataFrame,
+        and adds the 'Home_Win' target variable.
 
-        Parameters:
-            game_json (dict): JSON data for the game.
-            home_lineup (list of int): List of player IDs for the home team.
-            away_lineup (list of int): List of player IDs for the away team.
-            cumulative_player_stats (dict): Cumulative player statistics.
-            cumulative_team_stats (dict): Cumulative team statistics.
+        Ensures that feature vectors for each game only include data from previous games,
+        preventing lookahead bias.
+
+        Returns:
+            pd.DataFrame: DataFrame containing concatenated Retrosheet rows for all games with 'Home_Win' column.
         """
-        for team_type, lineup in [('home', home_lineup), ('away', away_lineup)]:
-            for player_id in lineup:
-                player_info = self.get_player_info(player_id, game_json, team_type)
-                if player_info is None:
-                    continue  # Skip if player not found
+        # Process games to get the Retrosheet DataFrame
+        retrosheet_df = self.process_games_retrosheet()
 
-                # Extract current game stats
-                batting_stats = player_info.get('seasonStats', {}).get('batting', {})
-                pitching_stats = player_info.get('seasonStats', {}).get('pitching', {})
-                fielding_stats = player_info.get('seasonStats', {}).get('fielding', {})
-                position_abbr = player_info.get('position', {}).get('abbreviation', '').upper()
+        # Add the game outcome target variable
+        retrosheet_df = self.add_game_outcome(retrosheet_df)
 
-                # Update batting stats
-                for key in BATTING_STAT_MAP.keys():
-                    cumulative_player_stats[player_id][key] += batting_stats.get(key, 0)
-
-                # Update pitching stats
-                for key in PITCHING_STAT_MAP.keys():
-                    if key == 'inningsPitched':
-                        innings = pitching_stats.get(key, 0.0)
-                        try:
-                            whole_innings = int(innings)
-                            fractional = innings - whole_innings
-                            outs_recorded = whole_innings * 3 + int(round(fractional * 10 / 3))
-                            cumulative_player_stats[player_id][key] += outs_recorded / 3
-                        except:
-                            cumulative_player_stats[player_id][key] += 0
-                    else:
-                        cumulative_player_stats[player_id][key] += pitching_stats.get(key, 0)
-
-                # Update fielding stats
-                if position_abbr in FIELDING_STAT_MAP:
-                    for key in FIELDING_STAT_MAP[position_abbr].keys():
-                        cumulative_player_stats[player_id][f"{position_abbr}_{key}"] += fielding_stats.get(key, 0)
-
-                # Update batting order and sequence as averages
-                ab = cumulative_player_stats[player_id].get('atBats', 0)
-                pa = cumulative_player_stats[player_id].get('plateAppearances', 0)
-                if ab > 0:
-                    cumulative_player_stats[player_id]['batting_order'] = pa / ab
-                    cumulative_player_stats[player_id]['batting_order_sequence'] = pa / ab
-                else:
-                    cumulative_player_stats[player_id]['batting_order'] = 0
-                    cumulative_player_stats[player_id]['batting_order_sequence'] = 0
-
-    def update_cumulative_team_stats(self, team_id, team_retrosheet_row, cumulative_team_stats):
-        """
-        Updates the cumulative team statistics with the aggregated team Retrosheet row.
-
-        Parameters:
-            team_id (int): Unique identifier for the team.
-            team_retrosheet_row (list): Aggregated Retrosheet statistics for the team.
-            cumulative_team_stats (dict): Cumulative team statistics.
-        """
-        # Iterate through team_retrosheet_row and update cumulative_team_stats
-        for idx, stat_value in enumerate(team_retrosheet_row):
-            stat_name = self.retrosheet_field_names[idx]
-            if isinstance(stat_value, (int, float)):
-                cumulative_team_stats[team_id][stat_name] += stat_value
+        return retrosheet_df
 
     def aggregate_team_retrosheet_stats(self, starting_batters, starting_pitcher, game_id, game_json, team_type,
                                         cumulative_player_stats, cumulative_team_stats):
@@ -593,33 +540,6 @@ class SavantRetrosheetConverter:
 
         return aggregated_stats
 
-    @staticmethod
-    def initialize_cumulative_stats():
-        """
-        Initializes data structures to hold cumulative player and team statistics.
-
-        Returns:
-            dict: Cumulative player stats.
-            dict: Cumulative team stats.
-        """
-        # Using defaultdict to automatically handle missing keys
-        cumulative_player_stats = defaultdict(lambda: defaultdict(float))
-        cumulative_team_stats = defaultdict(lambda: defaultdict(float))
-        return cumulative_player_stats, cumulative_team_stats
-
-    @staticmethod
-    def has_cumulative_stats(player_cumulative):
-        """
-        Determines if a player has any cumulative statistics.
-
-        Parameters:
-            player_cumulative (defaultdict): Cumulative statistics for the player.
-
-        Returns:
-            bool: True if the player has at least one non-zero statistic, False otherwise.
-        """
-        return any(value != 0 for value in player_cumulative.values())
-
     def process_games_retrosheet(self):
         """
         Processes all games in chronological order and returns a DataFrame where each row represents a game.
@@ -672,15 +592,47 @@ class SavantRetrosheetConverter:
                         'gamesStarted', 0) >= 1
                 ]
 
+            def exclude_new_batters(batter_ids, game_json, team):
+                filtered_batters = []
+                for batter_id in batter_ids:
+                    # Get player info
+                    player_info = game_json['boxscore']['teams'][team]['players'].get(f"ID{batter_id}")
+                    if not player_info:
+                        continue
+
+                    # Check if the player has cumulative stats for the current season
+                    season_stats = player_info.get('seasonStats', {}).get('batting', {})
+                    current_game_state = player_info.get('stats', {}).get('batting', {})
+                    previous_games_played = season_stats.get('gamesPlayed', 0) - current_game_state.get('gamesPlayed',
+                                                                                                        0)
+
+                    # Include batter only if they have stats for the current season
+                    if previous_games_played > 0:
+                        filtered_batters.append(batter_id)
+
+                return filtered_batters
+
             # Filter home and away batters
             starting_home_batters = filter_batters(
-                game_json['boxscore']['teams']['home']['batters'],
+                home_batters,
                 game_json,
                 'home'
             )
 
-            starting_away_batters = filter_batters(
-                game_json['boxscore']['teams']['away']['batters'],
+            starting_away_batters = exclude_new_batters(
+                away_batters,
+                game_json,
+                'away'
+            )
+
+            valid_starting_home_batters = exclude_new_batters(
+                starting_home_batters,
+                game_json,
+                'home'
+            )
+
+            valid_starting_away_batters = filter_batters(
+                starting_away_batters,
                 game_json,
                 'away'
             )
@@ -702,9 +654,15 @@ class SavantRetrosheetConverter:
             home_bullpen_pitchers = game_json['boxscore']['teams']['home']['bullpen']
             away_bullpen_pitchers = game_json['boxscore']['teams']['away']['bullpen']
 
+            # Log the number of excluded batters for debugging
+            excluded_home_batters = len(starting_home_batters) - len(valid_starting_home_batters)
+            excluded_away_batters = len(starting_away_batters) - len(valid_starting_away_batters)
+            print(
+                f"Excluded {excluded_home_batters} home batters and {excluded_away_batters} away batters without stats.")
+
             # Aggregate Home Team Retrosheet Stats using cumulative stats
             home_retrosheet_dict = self.aggregate_team_retrosheet_stats(
-                starting_batters=starting_home_batters,
+                starting_batters=valid_starting_home_batters,
                 starting_pitcher=home_probable_pitcher,
                 game_id=game_id,
                 game_json=game_json,
@@ -715,7 +673,7 @@ class SavantRetrosheetConverter:
 
             # Aggregate Away Team Retrosheet Stats using cumulative stats
             away_retrosheet_dict = self.aggregate_team_retrosheet_stats(
-                starting_batters=starting_away_batters,
+                starting_batters=valid_starting_away_batters,
                 starting_pitcher=away_probable_pitcher,
                 game_id=game_id,
                 game_json=game_json,
@@ -790,24 +748,77 @@ class SavantRetrosheetConverter:
 
         return retrosheet_df
 
-    def process_games_retrosheet_with_outcome(self):
+    def update_cumulative_stats_after_game(self, game_json, home_lineup, away_lineup,
+                                           cumulative_player_stats, cumulative_team_stats):
         """
-        Processes all games in chronological order, constructs the Retrosheet DataFrame,
-        and adds the 'Home_Win' target variable.
+        Updates cumulative statistics for all players and teams after processing a game.
 
-        Ensures that feature vectors for each game only include data from previous games,
-        preventing lookahead bias.
-
-        Returns:
-            pd.DataFrame: DataFrame containing concatenated Retrosheet rows for all games with 'Home_Win' column.
+        Parameters:
+            game_json (dict): JSON data for the game.
+            home_lineup (list of int): List of player IDs for the home team.
+            away_lineup (list of int): List of player IDs for the away team.
+            cumulative_player_stats (dict): Cumulative player statistics.
+            cumulative_team_stats (dict): Cumulative team statistics.
         """
-        # Process games to get the Retrosheet DataFrame
-        retrosheet_df = self.process_games_retrosheet()
+        for team_type, lineup in [('home', home_lineup), ('away', away_lineup)]:
+            for player_id in lineup:
+                player_info = self.get_player_info(player_id, game_json, team_type)
+                if player_info is None:
+                    continue  # Skip if player not found
 
-        # Add the game outcome target variable
-        retrosheet_df = self.add_game_outcome(retrosheet_df)
+                # Extract current game stats
+                batting_stats = player_info.get('seasonStats', {}).get('batting', {})
+                pitching_stats = player_info.get('seasonStats', {}).get('pitching', {})
+                fielding_stats = player_info.get('seasonStats', {}).get('fielding', {})
+                position_abbr = player_info.get('position', {}).get('abbreviation', '').upper()
 
-        return retrosheet_df
+                # Update batting stats
+                for key in BATTING_STAT_MAP.keys():
+                    cumulative_player_stats[player_id][key] += batting_stats.get(key, 0)
+
+                # Update pitching stats
+                for key in PITCHING_STAT_MAP.keys():
+                    if key == 'inningsPitched':
+                        innings = pitching_stats.get(key, 0.0)
+                        try:
+                            whole_innings = int(innings)
+                            fractional = innings - whole_innings
+                            outs_recorded = whole_innings * 3 + int(round(fractional * 10 / 3))
+                            cumulative_player_stats[player_id][key] += outs_recorded / 3
+                        except:
+                            cumulative_player_stats[player_id][key] += 0
+                    else:
+                        cumulative_player_stats[player_id][key] += pitching_stats.get(key, 0)
+
+                # Update fielding stats
+                if position_abbr in FIELDING_STAT_MAP:
+                    for key in FIELDING_STAT_MAP[position_abbr].keys():
+                        cumulative_player_stats[player_id][f"{position_abbr}_{key}"] += fielding_stats.get(key, 0)
+
+                # Update batting order and sequence as averages
+                ab = cumulative_player_stats[player_id].get('atBats', 0)
+                pa = cumulative_player_stats[player_id].get('plateAppearances', 0)
+                if ab > 0:
+                    cumulative_player_stats[player_id]['batting_order'] = pa / ab
+                    cumulative_player_stats[player_id]['batting_order_sequence'] = pa / ab
+                else:
+                    cumulative_player_stats[player_id]['batting_order'] = 0
+                    cumulative_player_stats[player_id]['batting_order_sequence'] = 0
+
+    def update_cumulative_team_stats(self, team_id, team_retrosheet_row, cumulative_team_stats):
+        """
+        Updates the cumulative team statistics with the aggregated team Retrosheet row.
+
+        Parameters:
+            team_id (int): Unique identifier for the team.
+            team_retrosheet_row (list): Aggregated Retrosheet statistics for the team.
+            cumulative_team_stats (dict): Cumulative team statistics.
+        """
+        # Iterate through team_retrosheet_row and update cumulative_team_stats
+        for idx, stat_value in enumerate(team_retrosheet_row):
+            stat_name = self.retrosheet_field_names[idx]
+            if isinstance(stat_value, (int, float)):
+                cumulative_team_stats[team_id][stat_name] += stat_value
 
     def load_json(self, filepath):
         """
@@ -840,6 +851,33 @@ class SavantRetrosheetConverter:
                 return info
         print('player stats not found')
         return None
+
+    @staticmethod
+    def initialize_cumulative_stats():
+        """
+        Initializes data structures to hold cumulative player and team statistics.
+
+        Returns:
+            dict: Cumulative player stats.
+            dict: Cumulative team stats.
+        """
+        # Using defaultdict to automatically handle missing keys
+        cumulative_player_stats = defaultdict(lambda: defaultdict(float))
+        cumulative_team_stats = defaultdict(lambda: defaultdict(float))
+        return cumulative_player_stats, cumulative_team_stats
+
+    @staticmethod
+    def has_cumulative_stats(player_cumulative):
+        """
+        Determines if a player has any cumulative statistics.
+
+        Parameters:
+            player_cumulative (defaultdict): Cumulative statistics for the player.
+
+        Returns:
+            bool: True if the player has at least one non-zero statistic, False otherwise.
+        """
+        return any(value != 0 for value in player_cumulative.values())
 
     @staticmethod
     def get_team_info(game_json, team_type):

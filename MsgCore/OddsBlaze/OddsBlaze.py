@@ -80,8 +80,8 @@ class OddsBlazeAPI:
                     record = {
                         'game_id': game['id'],
                         'commence_time': game['start'],
-                        'home_team': game['teams']['home']['abbreviation'],
-                        'away_team': game['teams']['away']['abbreviation'],
+                        'home_team': game['teams.json']['home']['abbreviation'],
+                        'away_team': game['teams.json']['away']['abbreviation'],
                         'sportsbook': sportsbook['name'],
                         'market': odds.get('market', ''),
                         'name': odds.get('name', ''),
