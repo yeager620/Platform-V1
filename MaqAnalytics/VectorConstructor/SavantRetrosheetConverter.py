@@ -16,62 +16,86 @@ BATTING_STAT_MAP = {
     "doubles": "B_2B",
     "triples": "B_3B",
     "homeRuns": "B_HR",
-    "grandSlams": "B_HR4",
     "rbi": "B_RBI",
-    "gameWinningRbi": "B_GW",
     "baseOnBalls": "B_BB",
     "intentionalWalks": "B_IBB",
     "strikeOuts": "B_SO",
     "groundIntoDoublePlay": "B_GDP",
+    "groundIntoTriplePlay": "B_GTP",
     "hitByPitch": "B_HP",
+    "caughtStealing": "B_CS",
+    "stolenBases": "B_SB",
+    # "stolenBasePercentage": "B_SB_PCT",
+    "leftOnBase": "B_LOB",
     "sacBunts": "B_SH",
     "sacFlies": "B_SF",
-    "stolenBases": "B_SB",
-    "caughtStealing": "B_CS",
     "catchersInterference": "B_XI",
-    "gamesAsPH": "B_G_PH",
-    "gamesAsPR": "B_G_PR"
+    "pickoffs": "B_PK",
+    # "atBatsPerHomeRun": "B_AB_HR",
+    "flyOuts": "B_FO",
+    "groundOuts": "B_GO"
 }
 
 # Mapping for Pitching Stats
 PITCHING_STAT_MAP = {
     "gamesPlayed": "P_G",
     "gamesStarted": "P_GS",
-    "completeGames": "P_CG",
-    "shutouts": "P_SHO",
-    "gamesFinished": "P_GF",
-    "wins": "P_W",
-    "losses": "P_L",
-    "saves": "P_SV",
-    "battersFaced": "P_TBF",
-    "atBats": "P_AB",
+    "groundOuts": "P_GO",
+    "airOuts": "P_AO",
     "runs": "P_R",
-    "earnedRuns": "P_ER",
-    "hits": "P_H",
-    "totalBases": "P_TB",
     "doubles": "P_2B",
     "triples": "P_3B",
     "homeRuns": "P_HR",
-    "grandSlamsAllowed": "P_HR4",
-    "walks": "P_BB",
-    "intentionalWalks": "P_IBB",
     "strikeOuts": "P_SO",
-    "groundIntoDoublePlay": "P_GDP",
-    "hitBatsmen": "P_HP",
-    "sacHitsAgainst": "P_SH",
-    "sacFliesAgainst": "P_SF",
-    "reachedOnInterference": "P_XI",
-    "wildPitches": "P_WP",
+    "baseOnBalls": "P_BB",
+    "intentionalWalks": "P_IBB",
+    "hits": "P_H",
+    "hitByPitch": "P_HP",
+    "atBats": "P_AB",
+    # "obp": "P_OBP",
+    "caughtStealing": "P_CS",
+    "stolenBases": "P_SB",
+    # "stolenBasePercentage": "P_SB_PCT",
+    "numberOfPitches": "P_PITCH",
+    # "era": "P_ERA",
+    "inningsPitched": "P_OUT",  # Convert innings to outs if applicable / necessary
+    "wins": "P_W",
+    "losses": "P_L",
+    "saves": "P_SV",
+    "saveOpportunities": "P_SVO",
+    "holds": "P_HOLD",
+    "blownSaves": "P_BLSV",
+    "earnedRuns": "P_ER",
+    # "whip": "P_WHIP",
+    "battersFaced": "P_TBF",
+    "outs": "P_OUTS",
+    "completeGames": "P_CG",
+    "shutouts": "P_SHO",
+    "pitchesThrown": "P_PITCHES",
+    "balls": "P_BALLS",
+    "strikes": "P_STRIKES",
+    # "strikePercentage": "P_STRIKE_PCT",
+    "hitBatsmen": "P_HBP",
     "balks": "P_BK",
+    "wildPitches": "P_WP",
+    "pickoffs": "P_PK",
+    # "groundOutsToAirouts": "P_GO_AO",
+    "rbi": "P_RBI",
+    # "winPercentage": "P_W_PCT",
+    # "pitchesPerInning": "P_PITCHES_IP",
+    "gamesFinished": "P_GF",
+    # "strikeoutWalkRatio": "P_SO_BB",
+    # "strikeoutsPer9Inn": "P_SO9",
+    # "walksPer9Inn": "P_BB9",
+    # "hitsPer9Inn": "P_H9",
+    # "runsScoredPer9": "P_R9",
+    # "homeRunsPer9": "P_HR9",
     "inheritedRunners": "P_IR",
     "inheritedRunnersScored": "P_IRS",
-    "groundOuts": "P_GO",
-    "airOuts": "P_AO",
-    "numberOfPitches": "P_PITCH",
-    "strikes": "P_STRIKE",
-    "gamesAtP": "F_P_G",
-    "gamesStartedAtP": "F_P_GS",
-    "inningsPitched": "P_OUT"  # This will be converted to outs
+    "catchersInterference": "P_CI",
+    "sacBunts": "P_SH",
+    "sacFlies": "P_SF",
+    "passedBall": "P_PB",
 }
 
 # Mapping for Fielding Stats based on Position Abbreviation
@@ -288,7 +312,6 @@ class SavantRetrosheetConverter:
         except:
             parsed_date = '1970-01-01'  # Default date if parsing fails
         stats_dict['date'] = parsed_date
-        stats_dict['game_number'] = game_json.get('gameNumber', 0)
         stats_dict['appearance_date'] = parsed_date
         stats_dict['team_id'] = player_info.get('parentTeamId', 0)
         stats_dict['player_id'] = player_info.get('person', {}).get('id', 0)
@@ -397,16 +420,35 @@ class SavantRetrosheetConverter:
 
         if games_played <= 0:
             print(f"Warning: gamesPlayed is {games_played} for player {stats_dict['player_id']}. Defaulting to 1.")
-
             games_played = 1  # Avoid division by zero
+
+        if innings_pitched <= 0:
+            print(f"Warning: inningsPitched is {innings_pitched} for player {stats_dict['player_id']}. Defaulting to 1.")
+            innings_pitched = 1  # Avoid division by zero
 
         # Normalize Batting Stats
         for stat_key in BATTING_STAT_MAP.keys():
             stats_dict[f"B_{stat_key}"] /= games_played
 
         # Normalize Pitching Stats
-        for stat_key in PITCHING_STAT_MAP.keys():
-            stats_dict[f"P_{stat_key}"] /= games_played
+        for stat_key, mapped_field in PITCHING_STAT_MAP.items():
+            if stat_key in {
+                "groundOuts", "airOuts", "runs", "earnedRuns", "hits", "doubles",
+                "triples", "homeRuns", "strikeOuts", "baseOnBalls", "intentionalWalks",
+                "hitByPitch", "wildPitches", "balks", "battersFaced", "numberOfPitches",
+                "stolenBases", "caughtStealing", "outs", "pitchesThrown", "balls", "strikes",
+                "hitBatsmen", "atBats"
+            }:
+                stats_dict[f"P_{stat_key}"] /= innings_pitched
+            elif stat_key in {
+                "gamesPlayed", "gamesStarted", "wins", "losses", "saves",
+                "saveOpportunities", "completeGames", "shutouts", "holds",
+                "blownSaves", "inheritedRunners", "inheritedRunnersScored", "gamesFinished"
+            }:
+                stats_dict[f"P_{stat_key}"] /= games_played
+            else:
+                # Skip or leave already normalized metrics as-is (e.g., ERA, WHIP)
+                stats_dict[f"P_{stat_key}"] = stats_dict.get(f"P_{stat_key}", 0)
 
         # Normalize Fielding Stats
         for stat_key in fielding_map.keys():
@@ -433,15 +475,29 @@ class SavantRetrosheetConverter:
         # Add the game outcome target variable
         retrosheet_df = self.add_game_outcome(retrosheet_df)
 
+        # Reorder columns to have specific ones at the beginning
+        first_columns = [
+            'Game_Date', 'Game_PK', 'Home_Team_Abbr', 'Away_Team_Abbr',
+            'park_id', 'Home_Win'
+        ]
+
+        # Keep other columns in their original order
+        other_columns = [col for col in retrosheet_df.columns if col not in first_columns]
+
+        # Reorder the DataFrame
+        retrosheet_df = retrosheet_df[first_columns + other_columns]
+
         return retrosheet_df
 
-    def aggregate_team_retrosheet_stats(self, starting_batters, starting_pitcher, game_id, game_json, team_type,
+    def aggregate_team_retrosheet_stats(self, starting_batters, starting_pitcher, bullpen, game_id, game_json, team_type,
                                         cumulative_player_stats, cumulative_team_stats):
         """
         Aggregates Retrosheet statistics for an entire team based on individual player stats using cumulative stats.
 
         Parameters:
-            lineup (list of int): List of player IDs in the team's lineup.
+            starting_batters (list of int): List of player IDs in the team's starting batting lineup
+            starting_pitcher (int): Probable pitcher id
+            bullpen (list of int): List of player ids in team pitcher bullpen (possible pitcher substitutions)
             game_id (str): Unique identifier for the game.
             game_json (dict): JSON data for the game.
             team_type (str): 'home' or 'away'.
@@ -517,6 +573,36 @@ class SavantRetrosheetConverter:
                 for stat in PITCHING_STAT_MAP.keys():
                     aggregated_stats[f"P_{stat}"] += player_stats.get(f"P_{stat}", 0)
 
+        num_subs = 0
+        total_sub_innings_pitched = 0
+
+        for player_id in bullpen:
+            player_info = self.get_player_info(player_id, game_json, team_type)
+            if player_info is None:
+                print(f"Player info not found for bullpen pitcher player_id {player_id} in team {team_type}")
+                continue
+            num_subs += 1
+
+            position_abbr = player_info.get('position', {}).get('abbreviation', '').upper()
+            player_stats = self.reconstruct_player_stats(
+                game_id=game_id,
+                game_json=game_json,
+                player_info=player_info,
+                is_home=(team_type == 'home')
+            )
+            try:
+                season_innings_pitched = float(
+                    player_info.get('seasonStats', {}).get('pitching', {}).get('inningsPitched', 0))
+                game_innings_pitched = float(player_info.get('stats', {}).get('pitching', {}).get('inningsPitched', 0))
+                sub_innings_pitched = season_innings_pitched - game_innings_pitched
+                total_sub_innings_pitched += sub_innings_pitched
+            except (ValueError, TypeError):
+                sub_innings_pitched = 0  # Fallback for invalid innings values
+
+            for stat in PITCHING_STAT_MAP.keys():
+                # SP: Substitution Pitcher
+                aggregated_stats[f"SP_{stat}"] += player_stats.get(f"P_{stat}", 0) * sub_innings_pitched
+
         # Normalize Batting Stats
         if num_batters > 0:
             for stat in BATTING_STAT_MAP.keys():
@@ -526,6 +612,11 @@ class SavantRetrosheetConverter:
         if num_pitchers > 0:
             for stat in PITCHING_STAT_MAP.keys():
                 aggregated_stats[f"P_{stat}"] /= num_pitchers
+
+        # Normalize Bullpen Pitching Stats
+        if num_subs > 0:
+            for stat in PITCHING_STAT_MAP.keys():
+                aggregated_stats[f"SP_{stat}"] /= total_sub_innings_pitched
 
         # Normalize Fielding Stats
         num_fielders = num_batters  # Fielders have the same number as batters (excluding DH)
@@ -564,6 +655,9 @@ class SavantRetrosheetConverter:
         for game_json in gamelogs_sorted:
             game_id = game_json['scoreboard']['gamePk']
             game_date = game_json['gameDate']
+
+            # Get park ID
+            park_id = game_json.get('scoreboard', {}).get('teams', {}).get('home', {}).get('venue', {}).get('id', 'Unknown')
 
             # Extract Home Team Information
             home_team_info = game_json['home_team_data']
@@ -652,7 +746,9 @@ class SavantRetrosheetConverter:
             away_pitchers = game_json['boxscore']['teams']['away']['pitchers']
 
             home_bullpen_pitchers = game_json['boxscore']['teams']['home']['bullpen']
+            home_bullpen_pitchers = [pitcher for pitcher in home_bullpen_pitchers if pitcher != home_probable_pitcher]
             away_bullpen_pitchers = game_json['boxscore']['teams']['away']['bullpen']
+            away_bullpen_pitchers = [pitcher for pitcher in away_bullpen_pitchers if pitcher != away_probable_pitcher]
 
             # Log the number of excluded batters for debugging
             excluded_home_batters = len(starting_home_batters) - len(valid_starting_home_batters)
@@ -664,6 +760,7 @@ class SavantRetrosheetConverter:
             home_retrosheet_dict = self.aggregate_team_retrosheet_stats(
                 starting_batters=valid_starting_home_batters,
                 starting_pitcher=home_probable_pitcher,
+                bullpen=home_bullpen_pitchers,
                 game_id=game_id,
                 game_json=game_json,
                 team_type='home',
@@ -675,6 +772,7 @@ class SavantRetrosheetConverter:
             away_retrosheet_dict = self.aggregate_team_retrosheet_stats(
                 starting_batters=valid_starting_away_batters,
                 starting_pitcher=away_probable_pitcher,
+                bullpen=away_bullpen_pitchers,
                 game_id=game_id,
                 game_json=game_json,
                 team_type='away',
@@ -691,12 +789,11 @@ class SavantRetrosheetConverter:
 
             # Include Team Names and Abbreviations, and gamePk and gameDate
             concatenated_row.update({
-                'Home_Team_Name': home_team_name,
-                'Home_Team_Abbr': home_team_abbr,
-                'Away_Team_Name': away_team_name,
-                'Away_Team_Abbr': away_team_abbr,
+                'Game_Date': game_date,
                 'Game_PK': game_id,
-                'Game_Date': game_date
+                'Home_Team_Abbr': home_team_abbr,
+                'Away_Team_Abbr': away_team_abbr,
+                'park_id': park_id,
             })
 
             retrosheet_rows.append(concatenated_row)
