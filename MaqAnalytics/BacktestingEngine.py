@@ -1,6 +1,6 @@
+import xgboost as xgb
 import pandas as pd
 import numpy as np
-from sklearn.feature_selection import RFECV
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
@@ -18,7 +18,6 @@ from sklearn.metrics import (
     classification_report,
 )
 import warnings
-import math
 
 warnings.filterwarnings("ignore")  # To suppress warnings for cleaner output
 
@@ -30,19 +29,11 @@ class BacktestingEngine:
         target_column: str,
         moneyline_columns: list,
         model_type: str = "logistic_regression",
-        initial_train_size: float = 0.1,
+        initial_train_size: float = 0.2,
         random_state: int = 42,
     ):
         """
         Initializes the BacktestingEngine with the dataset and model parameters.
-
-        Parameters:
-            data (pd.DataFrame): The dataset containing feature vectors and target variable.
-            target_column (str): The name of the target variable column.
-            moneyline_columns (list): List containing the names of the moneyline columns [home_moneyline, away_moneyline].
-            model_type (str): The type of model to use. Defaults to 'logistic_regression'.
-            initial_train_size (float): Proportion of the dataset to use for initial training before backtesting. Defaults to 0.1 (10%).
-            random_state (int): Controls the shuffling applied to the data before splitting. Defaults to 42.
         """
         self.y_train = None
         self.X_train = None
@@ -51,7 +42,7 @@ class BacktestingEngine:
         self.preprocessor = None
         self.data = data.copy()
         self.target_column = target_column
-        self.moneyline_columns = moneyline_columns  # [home_moneyline, away_moneyline]
+        self.moneyline_columns = moneyline_columns  # ['home_odds', 'away_odds']
         self.model_type = model_type.lower()
         self.initial_train_size = initial_train_size
         self.random_state = random_state
@@ -61,6 +52,7 @@ class BacktestingEngine:
         self.pipeline = None
         self.initial_train_data = None
         self.backtest_data = None
+        self.feature_names = None  # For feature importance
 
         # Preprocessing and model selection
         self.preprocess_data()
@@ -72,23 +64,32 @@ class BacktestingEngine:
         Preprocesses the data by handling missing values, encoding categorical variables,
         and scaling numerical features.
         """
-        # Sort data chronologically based on 'date' column
-        if 'date' in self.data.columns:
-            self.data.sort_values(by='date', inplace=True)
-        elif 'game_date' in self.data.columns:
-            self.data.sort_values(by='game_date', inplace=True)
+        # Sort data chronologically based on 'Game_Date' or 'date' column
+        if 'Game_Date' in self.data.columns:
+            self.data.sort_values(by='Game_Date', inplace=True)
         else:
-            raise ValueError("Data must contain a 'date' or 'game_date' column for chronological sorting.")
+            raise ValueError("Data must contain a 'Game_Date' column for chronological sorting.")
+
+        # Ensure 'park_id' is treated as a categorical variable by converting it to string
+        if 'park_id' in self.data.columns:
+            self.data['park_id'] = self.data['park_id'].astype(str)
+
+        # Drop rows with missing moneyline values
+        self.data.dropna(subset=self.moneyline_columns, inplace=True)
 
         # Separate features and target
         X = self.data.drop(columns=[self.target_column])
         y = self.data[self.target_column]
 
         # Identify numerical and categorical columns
-        numerical_cols = X.select_dtypes(include=["int64", "float64"]).columns.tolist()
-        # Exclude moneyline columns from categorical encoding
-        categorical_cols = X.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
-        categorical_cols = [col for col in categorical_cols if col not in self.moneyline_columns]
+        numerical_cols = [
+            col for col in X.select_dtypes(include=["int64", "float64"]).columns
+            if col not in self.moneyline_columns
+        ]
+        categorical_cols = [
+            col for col in X.select_dtypes(include=["object", "category", "bool"]).columns
+            if col not in self.moneyline_columns
+        ]
 
         # Define preprocessing steps
         numerical_transformer = Pipeline(steps=[
@@ -114,6 +115,20 @@ class BacktestingEngine:
         self.X = X
         self.y = y
 
+        # Save feature names after preprocessing
+        self.feature_names = self.get_feature_names()
+
+    def get_feature_names(self):
+        """
+        Retrieves the feature names after preprocessing.
+
+        Returns:
+            list: List of feature names.
+        """
+        # Fit the preprocessor to get feature names
+        self.preprocessor.fit(self.X)
+        return self.preprocessor.get_feature_names_out()
+
     def split_data(self):
         """
         Splits the data into initial training and backtesting sets based on chronological order.
@@ -134,10 +149,14 @@ class BacktestingEngine:
     def select_model(self):
         """
         Selects and initializes the machine learning model based on the specified model_type.
-        Defaults to Logistic Regression. Integrates probability calibration.
         """
         if self.model_type == "logistic_regression":
             base_model = LogisticRegression(random_state=self.random_state)
+        elif self.model_type == "xgboost":
+            base_model = xgb.XGBClassifier(
+                eval_metric='logloss',
+                random_state=self.random_state
+            )
         elif self.model_type == "random_forest":
             base_model = RandomForestClassifier(random_state=self.random_state)
         elif self.model_type == "gradient_boosting":
@@ -148,7 +167,7 @@ class BacktestingEngine:
             raise ValueError(f"Model type '{self.model_type}' is not supported.")
 
         # Wrap the base model with CalibratedClassifierCV for probability calibration
-        calibrated_model = CalibratedClassifierCV(base_estimator=base_model, method='sigmoid', cv=5)
+        calibrated_model = CalibratedClassifierCV(estimator=base_model, method='sigmoid', cv=3)
 
         # Create a pipeline that first preprocesses the data and then fits the calibrated model
         self.pipeline = Pipeline(steps=[
@@ -164,18 +183,13 @@ class BacktestingEngine:
 
     def update_model(self, X_new, y_new):
         """
-        Updates the model with new data by retraining. Since CalibratedClassifierCV does not support partial_fit,
-        the entire model is retrained with the existing and new data.
-
-        Parameters:
-            X_new (pd.DataFrame): New feature data.
-            y_new (pd.Series): New target data.
+        Updates the model with new data by retraining.
         """
         # Append new data to training set
         self.X_train = pd.concat([self.X_train, X_new], ignore_index=True)
         self.y_train = pd.concat([self.y_train, y_new], ignore_index=True)
 
-        # Retrain the pipeline (includes recalibrating probabilities)
+        # Retrain the pipeline
         self.pipeline.fit(self.X_train, self.y_train)
 
     def predict_proba_single_game(self, game_features):
@@ -191,40 +205,9 @@ class BacktestingEngine:
         proba = self.pipeline.predict_proba(game_features)[0][1]  # Assuming positive class is home win
         return proba
 
-    def optimize_features(self):
-        """
-        Uses Recursive Feature Elimination to find the best set of features that maximizes model performance.
-        """
-        # Define an RFE with cross-validation to determine the optimal number of features
-        rfe = RFECV(
-            estimator=self.pipeline.named_steps['calibrated_classifier'].base_estimator,
-            step=1,
-            cv=5,
-            scoring='roc_auc'  # Using ROC AUC as performance metric
-        )
-
-        # Fit RFE on the training data
-        self.pipeline.named_steps['preprocessor'].fit(self.X_train)
-        X_train_transformed = self.pipeline.named_steps['preprocessor'].transform(self.X_train)
-        rfe.fit(X_train_transformed, self.y_train)
-
-        # Update the pipeline to only use the selected features
-        self.pipeline.named_steps['preprocessor'].transformers_[0][2] = [col for i, col in
-                                                                         enumerate(self.X_train.columns) if
-                                                                         rfe.support_[i]]
-
-        # Print out the best features
-        print("Optimal features selected:", self.pipeline.named_steps['preprocessor'].transformers_[0][2])
-
     def run_backtest(self, initial_bankroll: float = 10000.0):
         """
-        Executes the backtesting simulation using the Kelly betting strategy.
-
-        Parameters:
-            initial_bankroll (float): Starting amount of money for betting.
-
-        Returns:
-            pd.DataFrame: DataFrame containing backtest results for each game.
+        Executes the backtesting simulation by placing one bet per day on the model's strongest favorite.
         """
         print("Training the initial model...")
         self.train_model()
@@ -233,54 +216,65 @@ class BacktestingEngine:
         bankroll = initial_bankroll
         results = []
 
-        # Iterate through each game in the backtest set
-        for index, game in self.backtest_data.iterrows():
-            game_id = game['game_id'] if 'game_id' in game else index
-            date = game['date'] if 'date' in game else game['game_date']
-            home_moneyline = game[self.moneyline_columns[0]]
-            away_moneyline = game[self.moneyline_columns[1]]
-            actual_outcome = game[self.target_column]  # Assuming 1 = home win, 0 = away win
+        # Ensure 'Game_Date' or 'date' column exists
+        date_column = 'Game_Date' if 'Game_Date' in self.backtest_data.columns else 'date'
 
-            # Extract feature vector for the game (exclude moneyline columns and target)
-            feature_columns = [col for col in self.backtest_data.columns if col not in self.moneyline_columns + [self.target_column]]
-            game_features = game[feature_columns].to_frame().T
+        # Group the backtest data by date
+        grouped = self.backtest_data.groupby(date_column)
 
-            # Predict probability of home win
-            prob_home_win = self.predict_proba_single_game(game_features)
+        # Iterate through each date
+        for date, group in grouped:
+            # Predict probabilities for all games on this date
+            game_probs = []
+            for index, game in group.iterrows():
+                game_id = game['Game_PK']
+                home_odds = game[self.moneyline_columns[0]]  # 'home_odds'
+                away_odds = game[self.moneyline_columns[1]]  # 'away_odds'
+                actual_outcome = game[self.target_column]  # Assuming 1 = home win, 0 = away win
 
-            # Convert moneylines to decimal odds
-            decimal_odds_home = self.moneyline_to_decimal(home_moneyline)
-            decimal_odds_away = self.moneyline_to_decimal(away_moneyline)
+                # Extract feature vector for the game (exclude moneyline columns and target)
+                feature_columns = [col for col in self.backtest_data.columns if col not in self.moneyline_columns + [self.target_column]]
+                game_features = game[feature_columns].to_frame().T
 
-            # Calculate expected value for betting on home
-            expected_value_home = prob_home_win * (decimal_odds_home - 1) - (1 - prob_home_win)
-            # Calculate Kelly fraction for betting on home
-            kelly_fraction_home = self.kelly_criterion(prob=prob_home_win, odds=decimal_odds_home)
+                # Predict probability of home win
+                prob_home_win = self.predict_proba_single_game(game_features)
 
-            # Similarly, calculate for betting on away
-            prob_away_win = 1 - prob_home_win
-            expected_value_away = prob_away_win * (decimal_odds_away - 1) - (1 - prob_away_win)
-            kelly_fraction_away = self.kelly_criterion(prob=prob_away_win, odds=decimal_odds_away)
+                # Store the game information and probability
+                game_probs.append({
+                    'game_id': game_id,
+                    'date': date,
+                    'game': game,
+                    'game_features': game_features,
+                    'prob_home_win': prob_home_win,
+                    'actual_outcome': actual_outcome
+                })
 
-            # Decide which team to bet on based on higher expected value
-            if expected_value_home > expected_value_away:
+            # Select the game with the highest predicted probability (farthest from 0.5)
+            highest_prob_game = max(game_probs, key=lambda x: abs(x['prob_home_win'] - 0.5))
+
+            # Decide on which team to bet based on higher predicted probability
+            prob_home_win = highest_prob_game['prob_home_win']
+            if prob_home_win > 0.5:
                 bet_on = 'home'
-                kelly_fraction = kelly_fraction_home
-                odds = decimal_odds_home
-                expected_return = expected_value_home
+                prob = prob_home_win
+                moneyline = highest_prob_game['game'][self.moneyline_columns[0]]  # home_odds
             else:
                 bet_on = 'away'
-                kelly_fraction = kelly_fraction_away
-                odds = decimal_odds_away
-                expected_return = expected_value_away
+                prob = 1 - prob_home_win
+                moneyline = highest_prob_game['game'][self.moneyline_columns[1]]  # away_odds
 
-            # Calculate bet amount
-            bet_amount = kelly_fraction * bankroll if kelly_fraction > 0 else 0
+            # Convert moneyline to decimal odds
+            decimal_odds = self.moneyline_to_decimal(moneyline)
+
+            # Calculate bet amount using Kelly Criterion
+            kelly_fraction = self.kelly_criterion(prob=prob, odds=decimal_odds)
+            bet_amount = 0.2 * kelly_fraction * bankroll if kelly_fraction > 0 else 0  # Fractional Kelly
 
             # Calculate potential payout
-            potential_payout = bet_amount * (odds - 1)
+            potential_payout = bet_amount * (decimal_odds - 1)
 
             # Determine if the bet was successful
+            actual_outcome = highest_prob_game['actual_outcome']
             if bet_on == 'home':
                 bet_won = 1 if actual_outcome == 1 else 0
             else:
@@ -296,25 +290,23 @@ class BacktestingEngine:
 
             # Record the result
             results.append({
-                'game_id': game_id,
+                'game_id': highest_prob_game['game_id'],
                 'date': date,
                 'bet_on': bet_on,
-                'prob_home_win': prob_home_win,
-                'prob_away_win': prob_away_win,
-                'home_moneyline': home_moneyline,
-                'away_moneyline': away_moneyline,
+                'prob': prob,
+                'moneyline': moneyline,
+                'decimal_odds': decimal_odds,
                 'kelly_fraction': kelly_fraction,
                 'bet_amount': bet_amount,
-                'odds': odds,
+                'potential_payout': potential_payout,
                 'bet_won': bet_won,
                 'profit': profit,
                 'bankroll': bankroll
             })
 
-            # Update the model with the outcome of the game
-            # Prepare the target for training: actual_outcome
-            # Assuming that the outcome is binary: 1 = home win, 0 = away win
-            self.update_model(X_new=game_features, y_new=pd.Series([actual_outcome]))
+            # Update the model with the outcome of all games on this date
+            for game_prob in game_probs:
+                self.update_model(X_new=game_prob['game_features'], y_new=pd.Series([game_prob['actual_outcome']]))
 
         # Convert results to DataFrame
         backtest_results = pd.DataFrame(results)
@@ -324,51 +316,32 @@ class BacktestingEngine:
     def kelly_criterion(prob: float, odds: float) -> float:
         """
         Calculates the Kelly fraction for a given probability and odds.
-
-        Parameters:
-            prob (float): Estimated probability of winning (0 < prob < 1).
-            odds (float): Decimal odds (odds > 1).
-
-        Returns:
-            float: Kelly fraction (0 <= fraction <= 1).
         """
         if odds <= 1:
             return 0.0
-        return max((prob * (odds - 1) - (1 - prob)) / (odds - 1), 0.0)
+        kelly = (prob * (odds - 1) - (1 - prob)) / (odds - 1)
+        return max(kelly, 0.0)
 
     @staticmethod
     def moneyline_to_decimal(moneyline: float) -> float:
         """
         Converts American moneyline odds to decimal odds.
-
-        Parameters:
-            moneyline (float): American moneyline odds.
-
-        Returns:
-            float: Decimal odds.
         """
         if moneyline > 0:
             return (moneyline / 100) + 1
         elif moneyline < 0:
             return (100 / abs(moneyline)) + 1
         else:
-            # Handle cases where moneyline is zero or invalid
             return 1.0  # Represents no payout
 
     @staticmethod
-    def evaluate_backtest(backtest_results: pd.DataFrame):
+    def evaluate_backtest(backtest_results: pd.DataFrame, initial_bankroll: float):
         """
         Evaluates the profitability of the backtest simulation.
-
-        Parameters:
-            backtest_results (pd.DataFrame): DataFrame containing backtest results for each game.
-
-        Returns:
-            dict: Dictionary containing total profit, ROI, number of bets, number of wins, etc.
         """
         total_profit = backtest_results['profit'].sum()
-        total_bet_amount = backtest_results['bet_amount'].sum()
-        roi = (total_profit / total_bet_amount) * 100 if total_bet_amount > 0 else 0
+        final_bankroll = backtest_results['bankroll'].iloc[-1] if not backtest_results.empty else initial_bankroll
+        roi = ((final_bankroll - initial_bankroll) / initial_bankroll) * 100
         total_bets = len(backtest_results)
         total_wins = backtest_results['bet_won'].sum()
         win_rate = (total_wins / total_bets) * 100 if total_bets > 0 else 0
@@ -379,30 +352,23 @@ class BacktestingEngine:
             'Total Bets': total_bets,
             'Total Wins': total_wins,
             'Win Rate (%)': win_rate,
-            'Final Bankroll': backtest_results['bankroll'].iloc[-1] if not backtest_results.empty else 0
+            'Final Bankroll': final_bankroll
         }
 
         return evaluation
 
-    def run_full_pipeline(self):
+    def run_full_pipeline(self, initial_bankroll: float = 10000.0):
         """
         Executes the full pipeline: training, backtesting, and evaluation.
-
-        Returns:
-            dict: Dictionary containing accuracy metrics, classification report, confusion matrix, and backtest evaluation.
-            pd.DataFrame: DataFrame containing backtest results for each game.
         """
-        # Run Recursive Feature Elimination (RFE) and optimize features
-        self.optimize_features()
-
         # Run backtest
         print("Starting backtest simulation...")
-        backtest_results = self.run_backtest()
+        backtest_results = self.run_backtest(initial_bankroll=initial_bankroll)
         print("Backtest simulation completed.\n")
 
         # Evaluate profitability
         print("Evaluating backtest performance...")
-        backtest_evaluation = self.evaluate_backtest(backtest_results)
+        backtest_evaluation = self.evaluate_backtest(backtest_results, initial_bankroll=initial_bankroll)
         print("Backtest evaluation completed.\n")
 
         # For accuracy evaluation, evaluate on the initial training set
@@ -426,21 +392,70 @@ class BacktestingEngine:
         classification_rep = classification_report(self.y_train, y_train_pred, zero_division=0)
         conf_matrix = confusion_matrix(self.y_train, y_train_pred)
 
+        # Get feature importances
+        feature_importances = self.get_feature_importances()
+
         results = {
             'Accuracy_Metrics': accuracy_metrics,
             'Classification_Report': classification_rep,
             'Confusion_Matrix': conf_matrix,
             'Backtest_Evaluation': backtest_evaluation,
-            'Backtest_Results': backtest_results
+            'Backtest_Results': backtest_results,
+            'Feature_Importances': feature_importances
         }
 
         return results
 
+    def get_feature_importances(self):
+        """
+        Retrieves feature importances from the trained model.
+
+        Returns:
+            pd.DataFrame: DataFrame containing feature names and their importances.
+        """
+        # Access the calibrated classifier
+        calibrated_classifier = self.pipeline.named_steps['calibrated_classifier']
+        # List to store importances from each fitted estimator
+        importances_list = []
+        feature_names = self.pipeline.named_steps['preprocessor'].get_feature_names_out()
+
+        # Handle different model types
+        if self.model_type in ["random_forest", "gradient_boosting", "xgboost"]:
+            # For tree-based models, extract feature importances from each fitted estimator
+            for calibrated_clf in calibrated_classifier.calibrated_classifiers_:
+                estimator = calibrated_clf.estimator  # Corrected attribute
+                importances_list.append(estimator.feature_importances_)
+            # Average the importances
+            importances = np.mean(importances_list, axis=0)
+        elif self.model_type == "logistic_regression":
+            # For logistic regression, use coefficients
+            for calibrated_clf in calibrated_classifier.calibrated_classifiers_:
+                estimator = calibrated_clf.estimator  # Corrected attribute
+                importances_list.append(np.abs(estimator.coef_[0]))
+            # Average the importances
+            importances = np.mean(importances_list, axis=0)
+        else:
+            # For models without direct feature importances
+            print(f"Feature importances not available for model type '{self.model_type}'.")
+            return None
+
+        # Create a DataFrame for feature importances
+        feature_importances = pd.DataFrame({
+            'Feature': feature_names,
+            'Importance': importances
+        })
+
+        # Sort features by importance
+        feature_importances.sort_values(by='Importance', ascending=False, inplace=True)
+        feature_importances.reset_index(drop=True, inplace=True)
+
+        print("\nFeature Importances:")
+        print(feature_importances.head(10))  # Display top 10 features
+
+        return feature_importances
+
     def get_trained_pipeline(self):
         """
         Returns the trained pipeline for further use or inspection.
-
-        Returns:
-            pipeline (Pipeline): Trained scikit-learn Pipeline object.
         """
         return self.pipeline

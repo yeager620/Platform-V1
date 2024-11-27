@@ -607,7 +607,7 @@ class SavantRetrosheetConverter:
                 aggregated_stats[f"P_{stat}"] /= num_pitchers
         '''
         # Normalize Bullpen Pitching Stats
-        if num_subs > 0:
+        if num_subs > 0 and total_sub_innings_pitched > 0:
             for stat in PITCHING_STAT_MAP.keys():
                 aggregated_stats[f"SP_{stat}"] /= total_sub_innings_pitched
 

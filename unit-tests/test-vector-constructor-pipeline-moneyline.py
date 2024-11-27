@@ -34,8 +34,8 @@ class TestDataPipeline(unittest.TestCase):
 
     def test_print_game_vectors_multiple_days(self):
         # Start Date
-        start_date = "2023-03-01"
-        end_date = "2023-04-01"
+        start_date = "2023-01-01"
+        end_date = "2024-11-26"
 
         # Initialize data pipeline instance
         pipeline = DataPipeline(start_date=start_date, end_date=end_date)
@@ -51,7 +51,7 @@ class TestDataPipeline(unittest.TestCase):
                                ):
             print(result_df)
 
-        result_df.to_csv("/Users/yeager/Desktop/Maquoketa-Platform-V1/unit-tests/test_game_vector_df_2023-01-01_2023-06-01.csv",
+        result_df.to_csv(f"/Users/yeager/Desktop/Maquoketa-Platform-V1/unit-tests/test_game_vector_df_{start_date}_{end_date}.csv",
                          index=False, mode='w')
 
 
