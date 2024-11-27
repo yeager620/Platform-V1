@@ -4,6 +4,11 @@ from datetime import datetime, timedelta
 import requests
 import pandas as pd
 from collections import defaultdict
+import logging
+
+# Configure logging at the beginning of your script or module
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Mapping for Batting Stats
 BATTING_STAT_MAP = {
@@ -101,105 +106,85 @@ PITCHING_STAT_MAP = {
 # Mapping for Fielding Stats based on Position Abbreviation
 FIELDING_STAT_MAP = {
     'P': {
-        "games": "F_P_G",
         "gamesStarted": "F_P_GS",
-        "outsRecorded": "F_P_OUT",
-        "totalChances": "F_P_TC",
+        "chances": "F_P_TC",
         "putOuts": "F_P_PO",
         "assists": "F_P_A",
         "errors": "F_P_E",
-        "doublePlays": "F_P_DP",
-        "triplePlays": "F_P_TP"
+        "caughtStealing": "N/A",
+        "stolenBases": "N/A"
     },
     'C': {
-        "games": "F_C_G",
         "gamesStarted": "F_C_GS",
-        "outsRecorded": "F_C_OUT",
-        "totalChances": "F_C_TC",
+        "chances": "F_C_TC",
         "putOuts": "F_C_PO",
         "assists": "F_C_A",
         "errors": "F_C_E",
-        "doublePlays": "F_C_DP",
-        "triplePlays": "F_C_TP",
-        "passedBalls": "F_C_PB",
-        "catchersInterference": "F_C_IX"
+        "caughtStealing": "N/A",
+        "stolenBases": "N/A"
     },
     '1B': {
-        "games": "F_1B_G",
         "gamesStarted": "F_1B_GS",
-        "outsRecorded": "F_1B_OUT",
-        "totalChances": "F_1B_TC",
+        "chances": "F_1B_TC",
         "putOuts": "F_1B_PO",
         "assists": "F_1B_A",
         "errors": "F_1B_E",
-        "doublePlays": "F_1B_DP",
-        "triplePlays": "F_1B_TP"
+        "caughtStealing": "N/A",
+        "stolenBases": "N/A"
     },
     '2B': {
-        "games": "F_2B_G",
         "gamesStarted": "F_2B_GS",
-        "outsRecorded": "F_2B_OUT",
-        "totalChances": "F_2B_TC",
+        "chances": "F_2B_TC",
         "putOuts": "F_2B_PO",
         "assists": "F_2B_A",
         "errors": "F_2B_E",
-        "doublePlays": "F_2B_DP",
-        "triplePlays": "F_2B_TP"
+        "caughtStealing": "N/A",
+        "stolenBases": "N/A"
     },
     '3B': {
-        "games": "F_3B_G",
         "gamesStarted": "F_3B_GS",
-        "outsRecorded": "F_3B_OUT",
-        "totalChances": "F_3B_TC",
+        "chances": "F_3B_TC",
         "putOuts": "F_3B_PO",
         "assists": "F_3B_A",
         "errors": "F_3B_E",
-        "doublePlays": "F_3B_DP",
-        "triplePlays": "F_3B_TP"
+        "caughtStealing": "N/A",
+        "stolenBases": "N/A"
     },
     'SS': {
-        "games": "F_SS_G",
         "gamesStarted": "F_SS_GS",
-        "outsRecorded": "F_SS_OUT",
-        "totalChances": "F_SS_TC",
+        "chances": "F_SS_TC",
         "putOuts": "F_SS_PO",
         "assists": "F_SS_A",
         "errors": "F_SS_E",
-        "doublePlays": "F_SS_DP",
-        "triplePlays": "F_SS_TP"
+        "caughtStealing": "N/A",
+        "stolenBases": "N/A"
     },
     'LF': {
-        "games": "F_LF_G",
         "gamesStarted": "F_LF_GS",
-        "outsRecorded": "F_LF_OUT",
-        "totalChances": "F_LF_TC",
+        "chances": "F_LF_TC",
         "putOuts": "F_LF_PO",
         "assists": "F_LF_A",
         "errors": "F_LF_E",
-        "doublePlays": "F_LF_DP",
-        "triplePlays": "F_LF_TP"
+        "caughtStealing": "N/A",
+        "stolenBases": "N/A"
     },
     'CF': {
-        "games": "F_CF_G",
         "gamesStarted": "F_CF_GS",
-        "outsRecorded": "F_CF_OUT",
-        "totalChances": "F_CF_TC",
+        "chances": "F_CF_TC",
         "putOuts": "F_CF_PO",
         "assists": "F_CF_A",
         "errors": "F_CF_E",
-        "doublePlays": "F_CF_DP",
-        "triplePlays": "F_CF_TP"
+        "caughtStealing": "N/A",
+        "stolenBases": "N/A"
     },
     'RF': {
-        "games": "F_RF_G",
         "gamesStarted": "F_RF_GS",
-        "outsRecorded": "F_RF_OUT",
-        "totalChances": "F_RF_TC",
+        "chances": "F_RF_TC",
         "putOuts": "F_RF_PO",
         "assists": "F_RF_A",
         "errors": "F_RF_E",
-        "doublePlays": "F_RF_DP",
-        "triplePlays": "F_RF_TP"
+        "caughtStealing": "N/A",
+        "stolenBases": "N/A"
     }
 }
 
@@ -373,16 +358,17 @@ class SavantRetrosheetConverter:
             value = adjusted_batting_stats.get(stat_key, 0)
             stats_dict[f"B_{stat_key}"] = value
 
-        # Pitching Stats
-        season_pitching = player_info.get('seasonStats', {}).get('pitching', {})
-        game_pitching = player_info.get('stats', {}).get('pitching', {})
-        adjusted_pitching_stats = get_adjusted_stats(PITCHING_STAT_MAP, season_pitching, game_pitching)
+        if position_abb == 'P':
+            # Pitching Stats
+            season_pitching = player_info.get('seasonStats', {}).get('pitching', {})
+            game_pitching = player_info.get('stats', {}).get('pitching', {})
+            adjusted_pitching_stats = get_adjusted_stats(PITCHING_STAT_MAP, season_pitching, game_pitching)
 
-        # Populate Pitching Stats
-        for stat_key, retrosheet_field in PITCHING_STAT_MAP.items():
-            value = adjusted_pitching_stats.get(stat_key, 0)
-            # Special handling for 'inningsPitched' -> 'P_OUT'
-            stats_dict[f"P_{stat_key}"] = value
+            # Populate Pitching Stats
+            for stat_key, retrosheet_field in PITCHING_STAT_MAP.items():
+                value = adjusted_pitching_stats.get(stat_key, 0)
+                # Special handling for 'inningsPitched' -> 'P_OUT'
+                stats_dict[f"P_{stat_key}"] = value
 
         # Fielding Stats
         position_abbr = player_info.get('position', {}).get('abbreviation', '').upper()
@@ -390,7 +376,6 @@ class SavantRetrosheetConverter:
         game_fielding = player_info.get('stats', {}).get('fielding', {})
         fielding_map = FIELDING_STAT_MAP.get(position_abbr, {})
         adjusted_fielding_stats = get_adjusted_stats(fielding_map, season_fielding, game_fielding)
-
         # Populate Fielding Stats
         for stat_key, retrosheet_field in fielding_map.items():
             value = adjusted_fielding_stats.get(stat_key, 0)
@@ -419,42 +404,42 @@ class SavantRetrosheetConverter:
             innings_pitched = 0  # Not applicable for non-pitchers
 
         if games_played <= 0:
-            print(f"Warning: gamesPlayed is {games_played} for player {stats_dict['player_id']}. Defaulting to 1.")
+            print(f"Warning (gamePk {game_id}): gamesPlayed is {games_played} for player {stats_dict['player_id']}. Defaulting to 1.")
             games_played = 1  # Avoid division by zero
 
         if innings_pitched <= 0:
-            print(f"Warning: inningsPitched is {innings_pitched} for player {stats_dict['player_id']}. Defaulting to 1.")
+            print(f"Warning (gamePk {game_id}): inningsPitched is {innings_pitched} for player {stats_dict['player_id']}. Defaulting to 1.")
             innings_pitched = 1  # Avoid division by zero
 
         # Normalize Batting Stats
         for stat_key in BATTING_STAT_MAP.keys():
             stats_dict[f"B_{stat_key}"] /= games_played
 
-        # Normalize Pitching Stats
-        for stat_key, mapped_field in PITCHING_STAT_MAP.items():
-            if stat_key in {
-                "groundOuts", "airOuts", "runs", "earnedRuns", "hits", "doubles",
-                "triples", "homeRuns", "strikeOuts", "baseOnBalls", "intentionalWalks",
-                "hitByPitch", "wildPitches", "balks", "battersFaced", "numberOfPitches",
-                "stolenBases", "caughtStealing", "outs", "pitchesThrown", "balls", "strikes",
-                "hitBatsmen", "atBats"
-            }:
-                stats_dict[f"P_{stat_key}"] /= innings_pitched
-            elif stat_key in {
-                "gamesPlayed", "gamesStarted", "wins", "losses", "saves",
-                "saveOpportunities", "completeGames", "shutouts", "holds",
-                "blownSaves", "inheritedRunners", "inheritedRunnersScored", "gamesFinished"
-            }:
-                stats_dict[f"P_{stat_key}"] /= games_played
-            else:
-                # Skip or leave already normalized metrics as-is (e.g., ERA, WHIP)
-                stats_dict[f"P_{stat_key}"] = stats_dict.get(f"P_{stat_key}", 0)
+        if position_abb == 'P':
+            # Normalize Pitching Stats
+            for stat_key, mapped_field in PITCHING_STAT_MAP.items():
+                if stat_key in {
+                    "groundOuts", "airOuts", "runs", "earnedRuns", "hits", "doubles",
+                    "triples", "homeRuns", "strikeOuts", "baseOnBalls", "intentionalWalks",
+                    "hitByPitch", "wildPitches", "balks", "battersFaced", "numberOfPitches",
+                    "stolenBases", "caughtStealing", "outs", "pitchesThrown", "balls", "strikes",
+                    "hitBatsmen", "atBats", "pickoffs", "sacBunts", "sacFlies", "catchersInterference",
+                    "inheritedRunnersScored", "rbi", "passedBall"
+                }:
+                    stats_dict[f"P_{stat_key}"] /= innings_pitched
+                elif stat_key in {
+                    "gamesPlayed", "gamesStarted", "wins", "losses", "saves",
+                    "saveOpportunities", "completeGames", "shutouts", "holds",
+                    "blownSaves", "inheritedRunners", "inheritedRunnersScored", "gamesFinished"
+                }:
+                    stats_dict[f"P_{stat_key}"] /= games_played
+                else:
+                    # Skip or leave already normalized metrics as-is (e.g., ERA, WHIP)
+                    stats_dict[f"P_{stat_key}"] = stats_dict.get(f"P_{stat_key}", 0)
 
         # Normalize Fielding Stats
         for stat_key in fielding_map.keys():
             stats_dict[f"F_{stat_key}"] /= games_played
-
-        print(f"Reconstructed stats for player {stats_dict['player_id']}: {stats_dict}")
 
         return stats_dict
 
@@ -510,6 +495,8 @@ class SavantRetrosheetConverter:
         aggregated_stats = defaultdict(float)
         num_batters = 0
         num_pitchers = 0
+        num_infielders = 0
+        num_outfielders = 0
 
         if starting_pitcher not in starting_batters:
             starting_lineup = starting_batters + [starting_pitcher]
@@ -561,8 +548,14 @@ class SavantRetrosheetConverter:
 
                 # Aggregate Fielding Stats
                 if position_abbr in FIELDING_STAT_MAP:
-                    for stat in FIELDING_STAT_MAP[position_abbr].keys():
-                        aggregated_stats[f"F_{stat}"] += player_stats.get(f"F_{stat}", 0)
+                    if position_abbr in ['1B', '2B', '3B', 'SS']:
+                        num_infielders += 1
+                        for stat in FIELDING_STAT_MAP[position_abbr].keys():
+                            aggregated_stats[f"F_IF_{stat}"] += player_stats.get(f"F_{stat}", 0)
+                    if position_abbr in ['LF', 'CF', 'RF']:
+                        num_outfielders += 1
+                        for stat in FIELDING_STAT_MAP[position_abbr].keys():
+                            aggregated_stats[f"F_OF_{stat}"] += player_stats.get(f"F_{stat}", 0)
                 else:
                     if position_abbr != 'DH':  # DH doesn't have fielding stats
                         print(f"Unrecognized position {position_abbr} for player_id {player_id}")
@@ -607,24 +600,29 @@ class SavantRetrosheetConverter:
         if num_batters > 0:
             for stat in BATTING_STAT_MAP.keys():
                 aggregated_stats[f"B_{stat}"] /= num_batters
-
+        '''
         # Normalize Pitching Stats
         if num_pitchers > 0:
             for stat in PITCHING_STAT_MAP.keys():
                 aggregated_stats[f"P_{stat}"] /= num_pitchers
-
+        '''
         # Normalize Bullpen Pitching Stats
         if num_subs > 0:
             for stat in PITCHING_STAT_MAP.keys():
                 aggregated_stats[f"SP_{stat}"] /= total_sub_innings_pitched
 
         # Normalize Fielding Stats
-        num_fielders = num_batters  # Fielders have the same number as batters (excluding DH)
-        if num_fielders > 0:
-            for position in FIELDING_STAT_MAP.keys():
-                for stat in FIELDING_STAT_MAP[position].keys():
-                    if f"F_{stat}" in aggregated_stats:
-                        aggregated_stats[f"F_{stat}"] /= num_fielders
+
+        # num_fielders = num_batters  # Fielders have the same number as batters (excluding DH)
+
+        if num_infielders > 0:
+            for stat in FIELDING_STAT_MAP['1B'].keys():
+                if f"F_IF_{stat}" in aggregated_stats:
+                    aggregated_stats[f"F_IF_{stat}"] /= num_infielders
+        if num_outfielders > 0:
+            for stat in FIELDING_STAT_MAP['LF'].keys():
+                if f"F_OF_{stat}" in aggregated_stats:
+                    aggregated_stats[f"F_IF_{stat}"] /= num_outfielders
 
         # Convert defaultdict to regular dict
         aggregated_stats = dict(aggregated_stats)
@@ -652,7 +650,7 @@ class SavantRetrosheetConverter:
         # Initialize cumulative stats
         cumulative_player_stats, cumulative_team_stats = self.initialize_cumulative_stats()
 
-        for game_json in gamelogs_sorted:
+        for idx, game_json in enumerate(gamelogs_sorted, start=1):
             game_id = game_json['scoreboard']['gamePk']
             game_date = game_json['gameDate']
 
@@ -739,8 +737,8 @@ class SavantRetrosheetConverter:
 
             # Get home and away probable pitchers: Use as starting pitcher
             # TODO: Implement edge case handling for no available probable pitchers
-            home_probable_pitcher = game_json['scoreboard']['probablePitchers']['home'].get('id', None)
-            away_probable_pitcher = game_json['scoreboard']['probablePitchers']['away'].get('id', None)
+            home_probable_pitcher = game_json['scoreboard']['probablePitchers'].get('home', {}).get('id', None)
+            away_probable_pitcher = game_json['scoreboard']['probablePitchers'].get('away', {}).get('id', None)
 
             home_pitchers = game_json['boxscore']['teams']['home']['pitchers']
             away_pitchers = game_json['boxscore']['teams']['away']['pitchers']
@@ -754,7 +752,7 @@ class SavantRetrosheetConverter:
             excluded_home_batters = len(starting_home_batters) - len(valid_starting_home_batters)
             excluded_away_batters = len(starting_away_batters) - len(valid_starting_away_batters)
             print(
-                f"Excluded {excluded_home_batters} home batters and {excluded_away_batters} away batters without stats.")
+                f"Warning (gamePk {game_id}): Excluded {excluded_home_batters} home batters and {excluded_away_batters} away batters without stats.")
 
             # Aggregate Home Team Retrosheet Stats using cumulative stats
             home_retrosheet_dict = self.aggregate_team_retrosheet_stats(
@@ -797,18 +795,10 @@ class SavantRetrosheetConverter:
             })
 
             retrosheet_rows.append(concatenated_row)
+            logger.info(f"Processed game {idx}: Game_PK {game_id}")
 
-            # Update cumulative stats after processing the game
-            # Not applicable for backtesting
-            '''
-            self.update_cumulative_stats_after_game(
-                game_json=game_json,
-                home_lineup=home_lineup,
-                away_lineup=away_lineup,
-                cumulative_player_stats=cumulative_player_stats,
-                cumulative_team_stats=cumulative_team_stats
-            )
-            '''
+        logger.info(f"Total games processed: {len(retrosheet_rows)}")
+
         # Create DataFrame
         df = pd.DataFrame(retrosheet_rows)
 

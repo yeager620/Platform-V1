@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import asyncio
 from datetime import datetime, timedelta
@@ -163,8 +164,18 @@ class OddsMatchingEngine:
         self.moneylines_df['date'] = pd.to_datetime(self.moneylines_df['date'])
 
         # Remove percentage sign and convert wager_percentage to numeric
-        self.moneylines_df['wager_percentage'] = self.moneylines_df['wager_percentage'].str.replace('%', '').astype(
-            float)
+        self.moneylines_df['wager_percentage'] = self.moneylines_df['wager_percentage'].str.replace('%', '')\
+
+        self.moneylines_df['wager_percentage'] = self.moneylines_df['wager_percentage'].replace('-', np.nan)
+
+        self.moneylines_df['wager_percentage'] = pd.to_numeric(
+            self.moneylines_df['wager_percentage'],
+            errors='coerce'
+        )
+
+        # Handle NaN values
+        # Fill NaN with 0.5
+        self.moneylines_df['wager_percentage'].fillna(0.5, inplace=True)
 
         # Convert odds to numeric
         self.moneylines_df['numeric_odds'] = self.moneylines_df['odds'].apply(self.convert_odds_to_numeric)
