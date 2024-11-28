@@ -12,7 +12,7 @@ class TestBacktestingEngineXGBoost(unittest.TestCase):
         """
         # Read the cleaned mock data into a DataFrame
         self.mock_data = pd.read_csv(
-            "/Users/yeager/Desktop/Maquoketa-Platform-V1/unit-tests/test_game_vector_df_2024-04-01_2024-11-26.csv")
+            "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/test_game_vector_df_2023-04-01_2024-11-26.csv")
 
         # Ensure 'park_id' is treated as categorical by converting it to string
         self.mock_data['park_id'] = self.mock_data['park_id'].astype(str)
@@ -26,13 +26,12 @@ class TestBacktestingEngineXGBoost(unittest.TestCase):
         Test the BacktestingEngine with XGBoost model on mock data.
         """
         try:
-            # Initialize the BacktestingEngine with model_type='xgboost', initial_train_size=0.5
             engine = BacktestingEngine(
                 data=self.mock_data,
                 target_column=self.target_column,
                 moneyline_columns=self.moneyline_columns,
                 model_type='xgboost',
-                initial_train_size=0.2,
+                initial_train_size=0.5,
                 random_state=28
             )
 

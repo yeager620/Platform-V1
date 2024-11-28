@@ -964,25 +964,43 @@ class SavantRetrosheetConverter:
 
     def fetch_game_pks(self):
         """
-        Fetches all gamePk's from the start date up to the current date.
-
-        Utilizes the MLB Stats API to retrieve game schedules within the specified date range.
+        Fetches all gamePk's from the start date up to the end date by splitting the date range into monthly chunks.
 
         Returns:
             list: List of gamePk integers.
         """
-        url = self.base_schedule_url.format(start_date=self.start_date, end_date=self.end_date)
-        response = requests.get(url)
-        if response.status_code != 200:
-            print(f"Failed to fetch gamePk's: {response.status_code}")
-            return []
-
-        data = response.json()
         game_pks = []
-        if 'dates' in data:
-            for date_info in data['dates']:
-                for game in date_info.get('games', []):
-                    game_pks.append(game['gamePk'])
+        start = datetime.strptime(self.start_date, "%Y-%m-%d")
+        end = datetime.strptime(self.end_date, "%Y-%m-%d")
+        delta = timedelta(days=30)  # Approximate one-month chunks
+
+        current_start = start
+        while current_start <= end:
+            current_end = min(current_start + delta, end)
+            formatted_start = current_start.strftime("%Y-%m-%d")
+            formatted_end = current_end.strftime("%Y-%m-%d")
+            url = self.base_schedule_url.format(start_date=formatted_start, end_date=formatted_end)
+
+            try:
+                response = requests.get(url)
+                if response.status_code != 200:
+                    logging.error(
+                        f"Failed to fetch gamePk's from {formatted_start} to {formatted_end}: {response.status_code}")
+                    current_start = current_end + timedelta(days=1)
+                    continue
+
+                data = response.json()
+                if 'dates' in data:
+                    for date_info in data['dates']:
+                        for game in date_info.get('games', []):
+                            game_pks.append(game['gamePk'])
+                logging.info(f"Fetched {len(data.get('dates', []))} dates from {formatted_start} to {formatted_end}")
+            except Exception as e:
+                logging.error(f"Exception while fetching gamePk's from {formatted_start} to {formatted_end}: {e}")
+
+            current_start = current_end + timedelta(days=1)
+
+        logging.info(f"Total gamePk's fetched: {len(game_pks)}")
         return game_pks
 
     async def fetch_gamelog_async(self, session, game_pk, pbar):
@@ -1035,7 +1053,7 @@ class SavantRetrosheetConverter:
 
     def get_unique_game_jsons(self):
         """
-        Retrieves a list of unique game JSONs for the date range from start_date to current_date.
+        Retrieves a list of unique game JSONs for the date range from start_date to end_date.
 
         Returns:
             list: List of game JSON dictionaries.
@@ -1051,4 +1069,5 @@ class SavantRetrosheetConverter:
             game_jsons = loop.run_until_complete(self.get_game_jsons_async(game_pks))
         # Filter out empty results
         game_jsons = [game for game in game_jsons if game]
+        logging.info(f"Total game JSONs fetched: {len(game_jsons)}")
         return game_jsons

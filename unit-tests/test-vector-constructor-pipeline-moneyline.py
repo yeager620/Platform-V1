@@ -29,13 +29,13 @@ class TestDataPipeline(unittest.TestCase):
 
         print(f"Number of columns in combined_df: {result_df.shape[1]}")
 
-        result_df.to_csv("/Users/yeager/Desktop/Maquoketa-Platform-V1/unit-tests/test_game_vector_df_2023-06-20.csv",
+        result_df.to_csv("/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/test_game_vector_df_2023-06-20.csv",
                          index=False, mode='w')
 
     def test_print_game_vectors_multiple_days(self):
         # Start Date
-        start_date = "2023-01-01"
-        end_date = "2024-11-26"
+        start_date = "2023-07-02"
+        end_date = "2023-08-01"
 
         # Initialize data pipeline instance
         pipeline = DataPipeline(start_date=start_date, end_date=end_date)
@@ -51,7 +51,7 @@ class TestDataPipeline(unittest.TestCase):
                                ):
             print(result_df)
 
-        result_df.to_csv(f"/Users/yeager/Desktop/Maquoketa-Platform-V1/unit-tests/test_game_vector_df_{start_date}_{end_date}.csv",
+        result_df.to_csv(f"/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.1-month_intervals/test_game_vector_df_{start_date}_{end_date}.csv",
                          index=False, mode='w')
 
 
