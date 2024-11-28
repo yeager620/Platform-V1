@@ -1,10 +1,15 @@
+import asyncio
 import json
 import datetime
 from datetime import datetime, timedelta
+
+import aiohttp
 import requests
 import pandas as pd
 from collections import defaultdict
 import logging
+from tqdm import tqdm  # Import tqdm for progress bars
+from tqdm.asyncio import tqdm_asyncio
 
 # Configure logging at the beginning of your script or module
 logging.basicConfig(level=logging.INFO)
@@ -200,8 +205,6 @@ def get_current_date():
 
 
 class SavantRetrosheetConverter:
-    # TODO: Fix normalization logic for player level data and full game vectors
-    # TODO: Ensure lineup is constructed from starting lineup, not final lineup, to prevent lookahead bias
     # TODO: Create theoretical projection calculator for game participation factor, specifically for pitchers
     def __init__(self, start_date, end_date=get_current_date()):
         """
@@ -474,8 +477,7 @@ class SavantRetrosheetConverter:
 
         return retrosheet_df
 
-    def aggregate_team_retrosheet_stats(self, starting_batters, starting_pitcher, bullpen, game_id, game_json, team_type,
-                                        cumulative_player_stats, cumulative_team_stats):
+    def aggregate_team_retrosheet_stats(self, starting_batters, starting_pitcher, bullpen, game_id, game_json, team_type):
         """
         Aggregates Retrosheet statistics for an entire team based on individual player stats using cumulative stats.
 
@@ -647,10 +649,7 @@ class SavantRetrosheetConverter:
 
         retrosheet_rows = []
 
-        # Initialize cumulative stats
-        cumulative_player_stats, cumulative_team_stats = self.initialize_cumulative_stats()
-
-        for idx, game_json in enumerate(gamelogs_sorted, start=1):
+        for idx, game_json in enumerate(tqdm(gamelogs_sorted, desc="Processing games"), start=1):
             game_id = game_json['scoreboard']['gamePk']
             game_date = game_json['gameDate']
 
@@ -761,9 +760,7 @@ class SavantRetrosheetConverter:
                 bullpen=home_bullpen_pitchers,
                 game_id=game_id,
                 game_json=game_json,
-                team_type='home',
-                cumulative_player_stats=cumulative_player_stats,
-                cumulative_team_stats=cumulative_team_stats
+                team_type='home'
             )
 
             # Aggregate Away Team Retrosheet Stats using cumulative stats
@@ -773,9 +770,7 @@ class SavantRetrosheetConverter:
                 bullpen=away_bullpen_pitchers,
                 game_id=game_id,
                 game_json=game_json,
-                team_type='away',
-                cumulative_player_stats=cumulative_player_stats,
-                cumulative_team_stats=cumulative_team_stats
+                team_type='away'
             )
 
             # Prefix stat names with 'Home_' and 'Away_'
@@ -940,20 +935,6 @@ class SavantRetrosheetConverter:
         return None
 
     @staticmethod
-    def initialize_cumulative_stats():
-        """
-        Initializes data structures to hold cumulative player and team statistics.
-
-        Returns:
-            dict: Cumulative player stats.
-            dict: Cumulative team stats.
-        """
-        # Using defaultdict to automatically handle missing keys
-        cumulative_player_stats = defaultdict(lambda: defaultdict(float))
-        cumulative_team_stats = defaultdict(lambda: defaultdict(float))
-        return cumulative_player_stats, cumulative_team_stats
-
-    @staticmethod
     def has_cumulative_stats(player_cumulative):
         """
         Determines if a player has any cumulative statistics.
@@ -1004,22 +985,53 @@ class SavantRetrosheetConverter:
                     game_pks.append(game['gamePk'])
         return game_pks
 
-    def fetch_gamelog(self, game_pk):
+    async def fetch_gamelog_async(self, session, game_pk, pbar):
         """
-        Fetches game log JSON for a specific gamePk.
+        Asynchronously fetches game log JSON for a specific gamePk.
 
         Parameters:
+            session (aiohttp.ClientSession): The aiohttp session object.
             game_pk (int): Unique identifier for the game.
+            pbar (tqdm): Progress bar object to update.
 
         Returns:
             dict: Game log JSON data.
         """
         url = self.base_gamelog_url.format(game_pk=game_pk)
-        response = requests.get(url)
-        if response.status_code != 200:
-            print(f"Failed to fetch gamelog for game_pk {game_pk}: {response.status_code}")
-            return {}
-        return response.json()
+        try:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to fetch gamelog for game_pk {game_pk}: {response.status}")
+                    data = {}
+                else:
+                    data = await response.json()
+        except Exception as e:
+            logger.error(f"Exception occurred while fetching game_pk {game_pk}: {e}")
+            data = {}
+        finally:
+            pbar.update(1)  # Update progress bar
+        return data
+
+    async def get_game_jsons_async(self, game_pks):
+        """
+        Asynchronously retrieves game JSONs for the provided game_pks.
+
+        Parameters:
+            game_pks (list): List of gamePk integers.
+
+        Returns:
+            list: List of game JSON dictionaries.
+        """
+        tasks = []
+        connector = aiohttp.TCPConnector(limit=10)  # Limit the number of concurrent connections
+        timeout = aiohttp.ClientTimeout(total=60)  # Set total timeout for all requests
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            with tqdm_asyncio(total=len(game_pks), desc="Fetching game logs") as pbar:
+                for game_pk in game_pks:
+                    task = asyncio.ensure_future(self.fetch_gamelog_async(session, game_pk, pbar))
+                    tasks.append(task)
+                game_jsons = await asyncio.gather(*tasks)
+        return game_jsons
 
     def get_unique_game_jsons(self):
         """
@@ -1029,9 +1041,14 @@ class SavantRetrosheetConverter:
             list: List of game JSON dictionaries.
         """
         game_pks = self.fetch_game_pks()
-        gamelogs = []
-        for game_pk in game_pks:
-            gamelog = self.fetch_gamelog(game_pk)
-            if gamelog:  # Ensure gamelog is not empty
-                gamelogs.append(gamelog)
-        return gamelogs
+        # Use asyncio.run() if Python >= 3.7
+        try:
+            game_jsons = asyncio.run(self.get_game_jsons_async(game_pks))
+        except RuntimeError:
+            # If an event loop is already running (e.g., in Jupyter), create a new loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            game_jsons = loop.run_until_complete(self.get_game_jsons_async(game_pks))
+        # Filter out empty results
+        game_jsons = [game for game in game_jsons if game]
+        return game_jsons

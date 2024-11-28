@@ -17,6 +17,7 @@ from sklearn.metrics import (
     confusion_matrix,
     classification_report,
 )
+from scipy.stats import ttest_1samp, wilcoxon  # Import statistical tests
 import warnings
 
 warnings.filterwarnings("ignore")  # To suppress warnings for cleaner output
@@ -155,6 +156,7 @@ class BacktestingEngine:
         elif self.model_type == "xgboost":
             base_model = xgb.XGBClassifier(
                 eval_metric='logloss',
+                use_label_encoder=False,
                 random_state=self.random_state
             )
         elif self.model_type == "random_forest":
@@ -216,6 +218,11 @@ class BacktestingEngine:
         bankroll = initial_bankroll
         results = []
 
+        # **NEW**: Lists to store predictions and actual outcomes
+        backtest_predictions = []
+        backtest_actuals = []
+        backtest_profits = []  # To store individual bet profits/losses
+
         # Ensure 'Game_Date' or 'date' column exists
         date_column = 'Game_Date' if 'Game_Date' in self.backtest_data.columns else 'date'
 
@@ -258,17 +265,23 @@ class BacktestingEngine:
                 bet_on = 'home'
                 prob = prob_home_win
                 moneyline = highest_prob_game['game'][self.moneyline_columns[0]]  # home_odds
+                predicted_label = 1  # Home win
             else:
                 bet_on = 'away'
                 prob = 1 - prob_home_win
                 moneyline = highest_prob_game['game'][self.moneyline_columns[1]]  # away_odds
+                predicted_label = 0  # Away win
+
+            # **NEW**: Collect predictions and actual outcomes
+            backtest_predictions.append(predicted_label)
+            backtest_actuals.append(highest_prob_game['actual_outcome'])
 
             # Convert moneyline to decimal odds
             decimal_odds = self.moneyline_to_decimal(moneyline)
 
             # Calculate bet amount using Kelly Criterion
             kelly_fraction = self.kelly_criterion(prob=prob, odds=decimal_odds)
-            bet_amount = 0.2 * kelly_fraction * bankroll if kelly_fraction > 0 else 0  # Fractional Kelly
+            bet_amount = kelly_fraction * bankroll if kelly_fraction > 0 else 0  # Fractional Kelly
 
             # Calculate potential payout
             potential_payout = bet_amount * (decimal_odds - 1)
@@ -287,6 +300,9 @@ class BacktestingEngine:
             else:
                 bankroll -= bet_amount
                 profit = -bet_amount
+
+            # **NEW**: Collect individual profits/losses
+            backtest_profits.append(profit)
 
             # Record the result
             results.append({
@@ -310,6 +326,12 @@ class BacktestingEngine:
 
         # Convert results to DataFrame
         backtest_results = pd.DataFrame(results)
+
+        # **NEW**: Store backtest predictions and actuals
+        self.backtest_predictions = backtest_predictions
+        self.backtest_actuals = backtest_actuals
+        self.backtest_profits = backtest_profits  # Store profits for statistical tests
+
         return backtest_results
 
     @staticmethod
@@ -334,10 +356,9 @@ class BacktestingEngine:
         else:
             return 1.0  # Represents no payout
 
-    @staticmethod
-    def evaluate_backtest(backtest_results: pd.DataFrame, initial_bankroll: float):
+    def evaluate_backtest(self, backtest_results: pd.DataFrame, initial_bankroll: float):
         """
-        Evaluates the profitability of the backtest simulation.
+        Evaluates the profitability of the backtest simulation and performs statistical tests.
         """
         total_profit = backtest_results['profit'].sum()
         final_bankroll = backtest_results['bankroll'].iloc[-1] if not backtest_results.empty else initial_bankroll
@@ -346,13 +367,32 @@ class BacktestingEngine:
         total_wins = backtest_results['bet_won'].sum()
         win_rate = (total_wins / total_bets) * 100 if total_bets > 0 else 0
 
+        # **NEW**: Perform statistical tests on profits
+        profits = np.array(self.backtest_profits)
+        # Remove zero profits (in case of no bets placed)
+        profits = profits[profits != 0]
+
+        # One-sample t-test (testing if mean profit is greater than zero)
+        t_stat, t_p_value = ttest_1samp(profits, popmean=0, alternative='greater')
+
+        # Wilcoxon Signed-Rank Test (non-parametric test)
+        try:
+            w_stat, w_p_value = wilcoxon(profits - 0, alternative='greater')
+        except ValueError:
+            # If all profits are the same value, the test cannot be performed
+            w_stat, w_p_value = np.nan, np.nan
+
         evaluation = {
             'Total Profit': total_profit,
             'Return on Investment (ROI %)': roi,
             'Total Bets': total_bets,
             'Total Wins': total_wins,
             'Win Rate (%)': win_rate,
-            'Final Bankroll': final_bankroll
+            'Final Bankroll': final_bankroll,
+            'T-Test Statistic': t_stat,
+            'T-Test p-value': t_p_value,
+            'Wilcoxon Test Statistic': w_stat,
+            'Wilcoxon Test p-value': w_p_value
         }
 
         return evaluation
@@ -371,14 +411,13 @@ class BacktestingEngine:
         backtest_evaluation = self.evaluate_backtest(backtest_results, initial_bankroll=initial_bankroll)
         print("Backtest evaluation completed.\n")
 
-        # For accuracy evaluation, evaluate on the initial training set
-        print("Evaluating model accuracy on the initial training set...")
-        y_train_pred = self.pipeline.predict(self.X_train)
-        accuracy = accuracy_score(self.y_train, y_train_pred)
-        precision = precision_score(self.y_train, y_train_pred, zero_division=0)
-        recall = recall_score(self.y_train, y_train_pred, zero_division=0)
-        f1 = f1_score(self.y_train, y_train_pred, zero_division=0)
-        roc_auc = roc_auc_score(self.y_train, self.pipeline.predict_proba(self.X_train)[:, 1])
+        # **UPDATED**: Evaluate model accuracy on backtesting predictions
+        print("Evaluating model accuracy on backtesting predictions...")
+        accuracy = accuracy_score(self.backtest_actuals, self.backtest_predictions)
+        precision = precision_score(self.backtest_actuals, self.backtest_predictions, zero_division=0)
+        recall = recall_score(self.backtest_actuals, self.backtest_predictions, zero_division=0)
+        f1 = f1_score(self.backtest_actuals, self.backtest_predictions, zero_division=0)
+        roc_auc = roc_auc_score(self.backtest_actuals, self.backtest_predictions)
 
         accuracy_metrics = {
             'Accuracy': accuracy,
@@ -389,8 +428,8 @@ class BacktestingEngine:
         }
 
         # Get classification report and confusion matrix
-        classification_rep = classification_report(self.y_train, y_train_pred, zero_division=0)
-        conf_matrix = confusion_matrix(self.y_train, y_train_pred)
+        classification_rep = classification_report(self.backtest_actuals, self.backtest_predictions, zero_division=0)
+        conf_matrix = confusion_matrix(self.backtest_actuals, self.backtest_predictions)
 
         # Get feature importances
         feature_importances = self.get_feature_importances()
@@ -424,7 +463,11 @@ class BacktestingEngine:
             # For tree-based models, extract feature importances from each fitted estimator
             for calibrated_clf in calibrated_classifier.calibrated_classifiers_:
                 estimator = calibrated_clf.estimator  # Corrected attribute
-                importances_list.append(estimator.feature_importances_)
+                if hasattr(estimator, 'feature_importances_'):
+                    importances_list.append(estimator.feature_importances_)
+                else:
+                    print(f"Estimator does not have feature_importances_ attribute.")
+                    return None
             # Average the importances
             importances = np.mean(importances_list, axis=0)
         elif self.model_type == "logistic_regression":
