@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 from datetime import datetime
+from tqdm import tqdm
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
@@ -105,7 +106,7 @@ class BacktestingEngine:
         self.data.dropna(subset=self.moneyline_columns, inplace=True)
 
         # Separate features and target
-        X = self.data.drop(columns=[self.target_column])
+        X = self.data.drop(columns=[self.target_column, "Game_Date", "Game_PK"])
         y = self.data[self.target_column]
 
         # Identify numerical and categorical columns
@@ -182,7 +183,6 @@ class BacktestingEngine:
         elif self.model_type == "xgboost":
             base_model = xgb.XGBClassifier(
                 eval_metric='logloss',
-                use_label_encoder=False,
                 random_state=self.random_state
             )
         elif self.model_type == "random_forest":
@@ -290,7 +290,7 @@ class BacktestingEngine:
         grouped = self.backtest_data.groupby(date_column)
 
         # Iterate through each date
-        for date, group in grouped:
+        for date, group in tqdm(grouped, total=len(grouped), desc="Processing Dates"):
             # Predict probabilities for all games on this date
             game_probs = []
             for index, game in group.iterrows():
@@ -571,7 +571,8 @@ class BacktestingEngine:
         plt.grid(True)
 
         # Save the plot
-        calibration_plot_file = os.path.join(self.output_folder, 'calibration_plot.png')
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        calibration_plot_file = os.path.join(self.output_folder, f'calibration_plot_{timestamp}.png')
         plt.savefig(calibration_plot_file)
         plt.close()
         print(f"Calibration plot saved to {calibration_plot_file}")
@@ -749,7 +750,7 @@ class BacktestingEngine:
             f.write(f"Report Generated on: {timestamp}\n")
 
             # Note about Calibration Plot
-            f.write("\nCalibration plot saved as 'calibration_plot.png' in the output folder.\n")
+            f.write("\nCalibration plot saved as 'calibration_plot_v1.1_n2849_23-24.png' in the output folder.\n")
 
         print(f"Test report saved to {report_file}")
 

@@ -47,8 +47,8 @@ def process_interval(start_end_tuple):
 
 def main():
     # Define the larger date range
-    overall_start_date = "2022-04-01"
-    overall_end_date = "2024-12-31"
+    overall_start_date = "2023-04-01"
+    overall_end_date = "2024-11-15"
 
     # Define the output directory and final CSV path
     output_directory = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.1-full_batched/"
