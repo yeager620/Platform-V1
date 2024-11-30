@@ -488,8 +488,6 @@ class SavantRetrosheetConverter:
             game_id (str): Unique identifier for the game.
             game_json (dict): JSON data for the game.
             team_type (str): 'home' or 'away'.
-            cumulative_player_stats (dict): Cumulative player statistics up to previous games.
-            cumulative_team_stats (dict): Cumulative team statistics up to previous games.
 
         Returns:
             dict: A dictionary representing the aggregated Retrosheet statistics for the team.
@@ -790,7 +788,6 @@ class SavantRetrosheetConverter:
             })
 
             retrosheet_rows.append(concatenated_row)
-            logger.info(f"Processed game {idx}: Game_PK {game_id}")
 
         logger.info(f"Total games processed: {len(retrosheet_rows)}")
 

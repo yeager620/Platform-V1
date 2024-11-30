@@ -51,7 +51,7 @@ def main():
     overall_end_date = "2024-11-15"
 
     # Define the output directory and final CSV path
-    output_directory = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.1-full_batched/"
+    output_directory = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.1-full/"
     final_csv_path = os.path.join(output_directory, f"game_vectors_{overall_start_date}_{overall_end_date}.csv")
     os.makedirs(output_directory, exist_ok=True)
 
