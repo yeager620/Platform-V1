@@ -1,0 +1,71 @@
+Backtesting Report
+==================
+
+Total number of games in dataset: 4710
+Total number of days in dataset: 465
+Initial training size: 75.0%
+
+Kelly fraction used: 1.0 (Full Kelly)
+
+Backtest Evaluation Metrics:
+Total Profit: 233374704771.0628
+Return on Investment (ROI %): 2333747047.7106285
+Total Bets: 113
+Total Wins: 79
+Win Rate (%): 69.91150442477876
+Final Bankroll: 233374714771.06284
+T-Test Statistic: 0.5689458759194898
+T-Test p-value: 0.2852660179108194
+Wilcoxon Test Statistic: 4345.0
+Wilcoxon Test p-value: 0.0006375682136565702
+Mann-Whitney U Statistic: 8927.0
+Mann-Whitney U p-value: 1.6076961844998596e-08
+Model Brier Score: 0.19156614571387245
+Bookmaker Brier Score: 0.23772569372689573
+Model Log Loss: 0.5682729690707907
+Bookmaker Log Loss: 0.6680686493619192
+Model AUC: 0.7923307823202952
+Bookmaker AUC: 0.6270002917919784
+Diebold-Mariano Statistic: -9.77959385607556
+Diebold-Mariano p-value: 1.0
+
+Model Accuracy Metrics:
+Accuracy: 0.7105263157894737
+Precision: 0.7011661807580175
+Recall: 0.779578606158833
+F1-Score: 0.7382962394474291
+ROC-AUC: 0.7923307823202952
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.72      0.63      0.68       561
+           1       0.70      0.78      0.74       617
+
+    accuracy                           0.71      1178
+   macro avg       0.71      0.71      0.71      1178
+weighted avg       0.71      0.71      0.71      1178
+
+Confusion Matrix:
+[[356 205]
+ [136 481]]
+
+Top 10 Feature Importances:
+                           Feature  Importance
+            num__away_odds_decimal    0.023284
+            num__home_implied_prob    0.020008
+                num__Away_SP_saves    0.018843
+                num__Home_SP_saves    0.014467
+    num__Away_SP_saveOpportunities    0.013844
+    num__Home_SP_saveOpportunities    0.010594
+num__Home_P_inheritedRunnersScored    0.008748
+            num__home_odds_decimal    0.008676
+              num__Home_P_shutouts    0.006841
+        num__away_wager_percentage    0.006815
+
+Additional Information:
+Model Type: xgboost
+Random State: 28
+Report Generated on: 2024-11-30_19-02-45
+
+Calibration plot saved as 'calibration_plot_2024-11-30_19-02-45.png' in the output folder.

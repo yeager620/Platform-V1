@@ -2,7 +2,7 @@
 
 import unittest
 import pandas as pd
-from MaqAnalytics.BacktestingEngine import BacktestingEngine  # Adjust the import path as necessary
+from MaqHistorical.BacktestingEngine import BacktestingEngine  # Adjust the import path as necessary
 
 
 class TestBacktestingEngineXGBoost(unittest.TestCase):
