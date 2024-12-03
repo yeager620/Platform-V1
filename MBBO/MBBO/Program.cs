@@ -4,6 +4,8 @@ using System;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using MBBO.LineData;
+using MBBO.Savant;
+using Newtonsoft.Json.Linq;
 
 namespace MBBO
 {
@@ -11,45 +13,28 @@ namespace MBBO
     {
         static async Task Main(string[] args)
         {
-            // Set up logging
-            using var loggerFactory = LoggerFactory.Create(builder =>
-            {
-                builder
-                    .AddConsole()
-                    .SetMinimumLevel(LogLevel.Information);
-            });
-            ILogger<SportsbookReviewScraper> logger = loggerFactory.CreateLogger<SportsbookReviewScraper>();
-
-            // Validate input arguments
-            if (args.Length < 2)
-            {
-                Console.WriteLine("Usage: SportsbookReviewScraper <start_date> <end_date>");
-                Console.WriteLine("Date format: YYYY-MM-DD");
-                return;
-            }
-
-            string startDate = args[0];
-            string endDate = args[1];
-
-            // Initialize scraper
-            var scraper = new SportsbookReviewScraper(startDate, endDate, logger);
+            // Initialize the LiveGamelogsFetcher with default parameters (7 days ahead, 10 concurrent requests)
+            LiveGamelogs fetcher = new LiveGamelogs();
 
             try
             {
-                Console.WriteLine("Starting scraping process...");
-                var data = await scraper.ScrapeAsync();
+                Console.WriteLine("Fetching game logs for the next 7 days...");
+                List<JObject> gamelogs = await fetcher.GetGamelogsForNextGamesAsync();
 
-                Console.WriteLine($"Scraped {data.Count} records.");
+                Console.WriteLine($"Fetched {gamelogs.Count} game logs.");
 
-                // Optionally, export to CSV
-                string csvPath = $"SportsbookData_{startDate}_to_{endDate}.csv";
-                scraper.ExportToCsv(data, csvPath);
-                Console.WriteLine($"Data exported to {csvPath}");
+                // Example: Display the first game's log
+                if (gamelogs.Count > 0)
+                {
+                    Console.WriteLine("Sample Game Log:");
+                    Console.WriteLine(gamelogs[0].ToString());
+                }
             }
             catch (Exception ex)
             {
-                logger.LogError($"An error occurred during scraping: {ex.Message}");
+                Console.WriteLine($"An error occurred: {ex.Message}");
             }
         }
+    
     }
 }
