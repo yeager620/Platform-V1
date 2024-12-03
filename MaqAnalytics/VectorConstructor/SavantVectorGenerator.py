@@ -205,15 +205,13 @@ def get_current_date():
 
 
 class SavantVectorGenerator:
+    # TODO: Create theoretical projection calculator for game participation factor, specifically for pitchers
     def __init__(self, start_date, end_date=get_current_date()):
         """
-        Version 1.2
-
-        Generates mlb player statistic feature vectors for all games in a set date range using BaseballSavant
+        Initializes the SavantRetrosheetConverter with a start date.
 
         Parameters:
             start_date (str): The start date in "MM/DD/YYYY" format.
-            end_date (str): The end date in "MM/DD/YYYY" format.
         """
         self.start_date = start_date  # Expected format: "MM/DD/YYYY"
         self.end_date = end_date  # Expected format: "MM/DD/YYYY"
@@ -409,19 +407,16 @@ class SavantVectorGenerator:
             innings_pitched = 0  # Not applicable for non-pitchers
 
         if games_played <= 0:
-            print(
-                f"Warning (gamePk {game_id}): gamesPlayed is {games_played} for player {stats_dict['player_id']}. Defaulting to 1.")
+            print(f"Warning (gamePk {game_id}): gamesPlayed is {games_played} for player {stats_dict['player_id']}. Defaulting to 1.")
             games_played = 1  # Avoid division by zero
 
         if innings_pitched <= 0:
-            print(
-                f"Warning (gamePk {game_id}): inningsPitched is {innings_pitched} for player {stats_dict['player_id']}. Defaulting to 1.")
+            print(f"Warning (gamePk {game_id}): inningsPitched is {innings_pitched} for player {stats_dict['player_id']}. Defaulting to 1.")
             innings_pitched = 1  # Avoid division by zero
 
         # Normalize Batting Stats
         for stat_key in BATTING_STAT_MAP.keys():
-            if stat_key != "gamesPlayed":
-                stats_dict[f"B_{stat_key}"] /= games_played
+            stats_dict[f"B_{stat_key}"] /= games_played
 
         if position_abb == 'P':
             # Normalize Pitching Stats
@@ -482,8 +477,7 @@ class SavantVectorGenerator:
 
         return retrosheet_df
 
-    def aggregate_team_retrosheet_stats(self, starting_batters, starting_pitcher, bullpen, game_id, game_json,
-                                        team_type):
+    def aggregate_team_retrosheet_stats(self, starting_batters, starting_pitcher, bullpen, game_id, game_json, team_type):
         """
         Aggregates Retrosheet statistics for an entire team based on individual player stats using cumulative stats.
 
@@ -500,11 +494,8 @@ class SavantVectorGenerator:
         """
         aggregated_stats = defaultdict(float)
 
-        batting_order_map = {}
-        batting_order_set = set()
-        allowed_order_values = set(range(1, 10))
-
-        no_order_map = {}
+        batting_slots = list(range(1, 10))  # 1 to 9
+        pitchers_without_order = []
 
         num_batters = 0
         num_pitchers = 0
@@ -522,10 +513,6 @@ class SavantVectorGenerator:
             player_info = self.get_player_info(player_id, game_json, team_type)
             if player_info is None:
                 continue
-            batting_order_map[player_id] = int(player_info.get('battingOrder', -100)) // 100
-            print(f"batting order for player {player_id} is {batting_order_map[player_id]}")
-            if batting_order_map[player_id] == -1:
-                no_order_map[player_id] = player_info.get('seasonStats', {}).get('batting', {}).get('gamesPlayed', 1)
             position_abbr = player_info.get('position', {}).get('abbreviation', '').upper()
             if position_abbr == 'DH':
                 has_dh = True
@@ -560,20 +547,8 @@ class SavantVectorGenerator:
             # Aggregate Batting Stats
             if is_batter:
                 num_batters += 1
-                batting_order = batting_order_map.get(player_id, -1)
-
-                if batting_order in allowed_order_values:
-                    if batting_order not in batting_order_set:
-                        # Assign stats to the correct slot
-                        batting_order_set.add(batting_order)
-                        for stat in BATTING_STAT_MAP.keys():
-                            aggregated_stats[f"B{batting_order}_{stat}"] = player_stats.get(f"B_{stat}", 0)
-                    else:
-                        # Duplicate batting order: Add to no_order_map for reassignment later
-                        no_order_map[player_id] = player_info.get('seasonStats', {}).get('batting', {}).get('gamesPlayed', 1)
-                else:
-                    # Invalid or missing batting order: Add to no_order_map
-                    no_order_map[player_id] = player_info.get('seasonStats', {}).get('batting', {}).get('gamesPlayed', 1)
+                for stat in BATTING_STAT_MAP.keys():
+                    aggregated_stats[f"B_{stat}"] += player_stats.get(f"B_{stat}", 0)
 
                 # Aggregate Fielding Stats
                 if position_abbr in FIELDING_STAT_MAP:
@@ -594,7 +569,6 @@ class SavantVectorGenerator:
                 num_pitchers += 1
                 for stat in PITCHING_STAT_MAP.keys():
                     aggregated_stats[f"P_{stat}"] += player_stats.get(f"P_{stat}", 0)
-
 
         num_subs = 0
         total_sub_innings_pitched = 0
@@ -626,47 +600,16 @@ class SavantVectorGenerator:
                 # SP: Substitution Pitcher
                 aggregated_stats[f"SP_{stat}"] += player_stats.get(f"P_{stat}", 0) * sub_innings_pitched
 
-        if len(no_order_map) != (9 - len(batting_order_map)):
-            print("Warning: Length of batters without batting order not equal to (9 - size of the batting order map)")
-
-        empty_slots = sorted(allowed_order_values - batting_order_set)
-        for player_id, games_played in sorted(no_order_map.items(), key=lambda item: item[1], reverse=True):
-            if not empty_slots:
-                print(f"Warning: Not enough slots for all players without batting orders.")
-                break
-
-            slot = empty_slots.pop(0)  # Assign the smallest available slot
-            batting_order_set.add(slot)
-
-            # Add player's stats to the corresponding slot in aggregated_stats
-            player_info = self.get_player_info(player_id, game_json, team_type)
-            player_stats = self.reconstruct_player_stats(
-                game_id=game_id,
-                game_json=game_json,
-                player_info=player_info,
-                is_home=(team_type == 'home')
-            )
+        # Normalize Batting Stats
+        if num_batters > 0:
             for stat in BATTING_STAT_MAP.keys():
-                aggregated_stats[f"B{slot}_{stat}"] = player_stats.get(f"B_{stat}", 0)
-
-        # Verify all slots are filled
-        if len(batting_order_set) < 9:
-            print(f"Warning: Only {len(batting_order_set)} slots filled. Remaining slots will be filled with pitcher statistics or be left blank.")
-
-            slot = empty_slots.pop(0)  # Assign the smallest available slot
-            batting_order_set.add(slot)
-
-            # Add player's stats to the corresponding slot in aggregated_stats
-            player_info = self.get_player_info(starting_pitcher, game_json, team_type)
-            player_stats = self.reconstruct_player_stats(
-                game_id=game_id,
-                game_json=game_json,
-                player_info=player_info,
-                is_home=(team_type == 'home')
-            )
-            for stat in BATTING_STAT_MAP.keys():
-                aggregated_stats[f"B{slot}_{stat}"] = player_stats.get(f"B_{stat}", 0)
-
+                aggregated_stats[f"B_{stat}"] /= num_batters
+        '''
+        # Normalize Pitching Stats
+        if num_pitchers > 0:
+            for stat in PITCHING_STAT_MAP.keys():
+                aggregated_stats[f"P_{stat}"] /= num_pitchers
+        '''
         # Normalize Bullpen Pitching Stats
         if num_subs > 0 and total_sub_innings_pitched > 0:
             for stat in PITCHING_STAT_MAP.keys():
@@ -713,8 +656,7 @@ class SavantVectorGenerator:
             game_date = game_json['gameDate']
 
             # Get park ID
-            park_id = game_json.get('scoreboard', {}).get('teams', {}).get('home', {}).get('venue', {}).get('id',
-                                                                                                            'Unknown')
+            park_id = game_json.get('scoreboard', {}).get('teams', {}).get('home', {}).get('venue', {}).get('id', 'Unknown')
 
             # Extract Home Team Information
             home_team_info = game_json['home_team_data']
