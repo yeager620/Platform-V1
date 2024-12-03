@@ -1,8 +1,6 @@
-# main.py
-
 import os
-import json
 import datetime
+from datetime import datetime
 import signal
 import threading
 import time
@@ -13,8 +11,8 @@ from sklearn.linear_model import LogisticRegression
 import xgboost as xgb
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 
-from VectorConstructor.DataPipeline import DataPipeline
 from .LiveGamelogsFeed import LiveGamelogsFeed
+from MaqAnalytics.VectorConstructor.SavantVectorGenerator import SavantVectorGenerator
 
 
 class Engine:
@@ -23,9 +21,9 @@ class Engine:
             dataset_path: str,
             target_column: str,
             moneyline_columns: list,
-            days_ahead: int = 30,
+            days_ahead: int = 7,
             max_concurrent_requests: int = 10,
-            update_interval: int = 300,  # seconds
+            update_interval: int = 3600,  # seconds
             callback: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
             model_type: str = "xgboost",
             output_folder: str = "/Users/yeager/Desktop/Maquoketa-Platform-V1/MaqAnalytics/MaqLive/live-reports",
@@ -51,6 +49,7 @@ class Engine:
         self.moneyline_columns = moneyline_columns
 
         self.data = self.load_dataset()
+        self.savant_vector_generator = SavantVectorGenerator(datetime.date.today().strftime("%Y-%m-%d"), (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"))
 
         # Train the model on 100% of the data
         self.train_model()
@@ -67,6 +66,8 @@ class Engine:
         self.model_type = model_type
         self.output_folder = output_folder
         self.random_state = random_state
+
+        self.pipeline = None
 
     def load_dataset(self) -> pd.DataFrame:
         """
@@ -107,15 +108,8 @@ class Engine:
         """
         Prepare data and train the machine learning model.
         """
-        print("Preparing data for training...")
-        combined_df = self.live_game_predictor.prepare_data()
 
-        print("Training the model on the entire dataset...")
-        self.live_game_predictor.train_model(combined_df)
-        print("Model training and calibration completed.")
-
-        # Optionally, perform cross-validation
-        self.perform_cross_validation(combined_df)
+        pass
 
     def perform_cross_validation(self, combined_df: pd.DataFrame, cv_folds: int = 5):
         """
@@ -128,7 +122,7 @@ class Engine:
         target = combined_df["Home_Win"]
 
         # Define a pipeline consistent with LiveGamePredictor's preprocessing
-        pipeline = self.live_game_predictor.pipeline
+        pipeline = self.pipeline
 
         print(f"Performing {cv_folds}-fold cross-validation...")
         cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=self.random_state)

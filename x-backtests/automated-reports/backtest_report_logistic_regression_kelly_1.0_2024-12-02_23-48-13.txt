@@ -1,0 +1,81 @@
+Backtesting Report
+==================
+
+Total number of games in dataset: 4710
+Total number of days in dataset: 465
+Initial training size: 75.0%
+
+Kelly fraction used: 1.0 (Full Kelly)
+
+Backtest Evaluation Metrics:
+Total Profit: 406191872.6589745
+Return on Investment (ROI %): 4061918.726589746
+Total Bets: 114
+Total Wins: 82
+Win Rate (%): 71.9298245614035
+Final Bankroll: 406201872.6589746
+T-Test Statistic: 0.4466119068023575
+T-Test p-value: 0.32801665740331043
+Wilcoxon Test Statistic: 4111.0
+Wilcoxon Test p-value: 0.0015832325176928317
+Mann-Whitney U Statistic: 8991.0
+Mann-Whitney U p-value: 1.285989145743374e-10
+Model Brier Score: 0.20657753268000703
+Bookmaker Brier Score: 0.23772569372689573
+Model Log Loss: 0.6017752952404369
+Bookmaker Log Loss: 0.6680686493619192
+Model AUC: 0.7578588824656134
+Bookmaker AUC: 0.6270002917919784
+Diebold-Mariano Statistic: -8.654720017866381
+Diebold-Mariano p-value: 1.0
+
+Model Accuracy Metrics:
+Accuracy: 0.6994906621392191
+Precision: 0.6849507735583685
+Recall: 0.7893030794165316
+F1-Score: 0.7334337349397589
+ROC-AUC: 0.7578588824656134
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.72      0.60      0.66       561
+           1       0.68      0.79      0.73       617
+
+    accuracy                           0.70      1178
+   macro avg       0.70      0.70      0.69      1178
+weighted avg       0.70      0.70      0.70      1178
+
+Confusion Matrix:
+[[337 224]
+ [130 487]]
+
+Top 20 Feature Importances:
+                       Feature  Importance
+        cat__Away_Team_Abbr_KC    0.733564
+        cat__Away_Team_Abbr_SD    0.615272
+            num__Home_SP_saves    0.487633
+            num__Away_SP_saves    0.471137
+       cat__Away_Team_Abbr_BOS    0.463888
+       cat__Away_Team_Abbr_CHC    0.463584
+          num__Away_SP_strikes    0.405334
+        cat__Away_Team_Abbr_SF    0.398718
+        num__Away_P_earnedRuns    0.395317
+        num__home_implied_prob    0.393615
+        num__away_implied_prob    0.393615
+       cat__Away_Team_Abbr_MIL    0.386368
+       cat__Away_Team_Abbr_NYY    0.380814
+       cat__Away_Team_Abbr_MIN    0.352081
+num__Away_SP_saveOpportunities    0.345873
+               cat__park_id_22    0.334571
+       cat__Home_Team_Abbr_LAD    0.334571
+          num__Home_SP_doubles    0.332939
+num__Home_SP_saveOpportunities    0.331697
+        cat__Away_Team_Abbr_TB    0.330314
+
+Additional Information:
+Model Type: logistic_regression
+Random State: 28
+Report Generated on: 2024-12-02_23-48-13
+
+Calibration plot saved as 'calibration_plot_2024-12-02_23-48-13.png' in the output folder.

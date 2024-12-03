@@ -1,0 +1,71 @@
+Backtesting Report
+==================
+
+Total number of games in dataset: 4710
+Total number of days in dataset: 465
+Initial training size: 67.0%
+
+Kelly fraction used: 1.0 (Full Kelly)
+
+Backtest Evaluation Metrics:
+Total Profit: 8429406235929446.0
+Return on Investment (ROI %): 84294062359294.44
+Total Bets: 152
+Total Wins: 112
+Win Rate (%): 73.68421052631578
+Final Bankroll: 8429406235939443.0
+T-Test Statistic: 0.5700371878652709
+T-Test p-value: 0.28475263778791604
+Wilcoxon Test Statistic: 8444.0
+Wilcoxon Test p-value: 2.49212220604686e-07
+Mann-Whitney U Statistic: 16912.0
+Mann-Whitney U p-value: 4.095951367302924e-15
+Model Brier Score: 0.19504017652593642
+Bookmaker Brier Score: 0.23785491282631666
+Model Log Loss: 0.5761073865186291
+Bookmaker Log Loss: 0.6683298316489147
+Model AUC: 0.7793185722783267
+Bookmaker AUC: 0.6229567303698239
+Diebold-Mariano Statistic: -10.662469732480771
+Diebold-Mariano p-value: 1.0
+
+Model Accuracy Metrics:
+Accuracy: 0.7054662379421222
+Precision: 0.7018498367791077
+Recall: 0.7780458383594693
+F1-Score: 0.7379862700228833
+ROC-AUC: 0.7793185722783267
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.71      0.62      0.66       726
+           1       0.70      0.78      0.74       829
+
+    accuracy                           0.71      1555
+   macro avg       0.71      0.70      0.70      1555
+weighted avg       0.71      0.71      0.70      1555
+
+Confusion Matrix:
+[[452 274]
+ [184 645]]
+
+Top 10 Feature Importances:
+                           Feature  Importance
+            num__home_implied_prob    0.024262
+            num__away_odds_decimal    0.023152
+                num__Away_SP_saves    0.018808
+    num__Away_SP_saveOpportunities    0.016164
+                num__Home_SP_saves    0.013650
+            cat__Home_Team_Abbr_KC    0.010821
+      num__Home_P_intentionalWalks    0.009582
+num__Home_P_inheritedRunnersScored    0.009509
+    num__Home_SP_saveOpportunities    0.009143
+                 num__Home_P_holds    0.008925
+
+Additional Information:
+Model Type: xgboost
+Random State: 28
+Report Generated on: 2024-11-30_21-30-02
+
+Calibration plot saved as 'calibration_plot_2024-11-30_21-30-02.png' in the output folder.

@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import os
 from datetime import datetime
+
+from sklearn.impute import SimpleImputer
 from tqdm import tqdm
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
@@ -97,7 +99,9 @@ class BacktestingEngine:
 
         # Define preprocessing steps
         numerical_transformer = Pipeline(steps=[
+            ("imputer", SimpleImputer(strategy="mean")),
             ("scaler", StandardScaler())
+
         ])
 
         categorical_transformer = Pipeline(steps=[
@@ -142,7 +146,7 @@ class BacktestingEngine:
 
     def select_model(self):
         if self.model_type == "logistic_regression":
-            base_model = LogisticRegression(random_state=self.random_state)
+            base_model = LogisticRegression(random_state=self.random_state, max_iter=1000)
         elif self.model_type == "xgboost":
             base_model = xgb.XGBClassifier(
                 eval_metric='logloss',
@@ -528,6 +532,9 @@ class BacktestingEngine:
         # Generate and save the report
         self.generate_report(results)
 
+        # Plot bankroll over time
+        self.plot_bankroll_over_time(backtest_results)
+
         return results
 
     def get_feature_importances(self):
@@ -563,7 +570,7 @@ class BacktestingEngine:
         feature_importances.reset_index(drop=True, inplace=True)
 
         print("\nFeature Importances:")
-        print(feature_importances.head(10))  # Display top 10 features
+        print(feature_importances.head(20))  # Display top 20 features
 
         return feature_importances
 
@@ -607,8 +614,8 @@ class BacktestingEngine:
             f.write(f"{results['Confusion_Matrix']}\n")
 
             if results['Feature_Importances'] is not None:
-                f.write("\nTop 10 Feature Importances:\n")
-                f.write(results['Feature_Importances'].head(10).to_string(index=False))
+                f.write("\nTop 20 Feature Importances:\n")
+                f.write(results['Feature_Importances'].head(20).to_string(index=False))
             else:
                 f.write("\nFeature importances not available for the selected model.\n")
 
@@ -620,6 +627,41 @@ class BacktestingEngine:
             f.write(f"\nCalibration plot saved as 'calibration_plot_{timestamp}.png' in the output folder.\n")
 
         print(f"Test report saved to {report_file}")
+
+    def plot_bankroll_over_time(self, backtest_results: pd.DataFrame):
+        """
+        Plot bankroll over time with a log-scaled y-axis.
+
+        :param backtest_results: DataFrame containing backtest results, including bankroll per game.
+        """
+        if backtest_results.empty:
+            print("No results to plot.")
+            return
+
+        try:
+            # Extract dates and bankroll
+            dates = pd.to_datetime(backtest_results['date'])
+            bankroll = backtest_results['bankroll']
+
+            # Create the plot
+            plt.figure(figsize=(12, 6))
+            plt.plot(dates, bankroll, label='Bankroll', marker='o', markersize=4, linewidth=2)
+            plt.yscale('log')  # Log scale for y-axis
+            plt.title('Bankroll Over Time (Log-Scaled)')
+            plt.xlabel('Date')
+            plt.ylabel('Bankroll (Log Scale)')
+            plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+            plt.legend()
+
+            # Save the plot
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            plot_file = os.path.join(self.output_folder, f'bankroll_over_time_{timestamp}.png')
+            plt.savefig(plot_file)
+            plt.close()
+
+            print(f"Bankroll over time plot saved to {plot_file}")
+        except Exception as e:
+            print(f"Error plotting bankroll over time: {e}")
 
     def get_trained_pipeline(self):
         return self.pipeline

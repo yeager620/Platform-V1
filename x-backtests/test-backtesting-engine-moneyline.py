@@ -1,8 +1,6 @@
-# File: unit-tests/test-backtesting-engine-moneyline.py
-
 import unittest
 import pandas as pd
-from MaqHistorical.BacktestingEngine import BacktestingEngine  # Adjust the import path as necessary
+from MaqAnalytics.MaqHistorical.BacktestingEngine import BacktestingEngine
 
 
 class TestBacktestingEngineXGBoost(unittest.TestCase):
@@ -12,7 +10,7 @@ class TestBacktestingEngineXGBoost(unittest.TestCase):
         """
         # Read the cleaned mock data into a DataFrame
         self.mock_data = pd.read_csv(
-            "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.1-full/v1.1-n4775-game-vectors_2021-04-01_2024-10-30.csv")
+            "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.1-full/v1.1-n4710-game-vectors_2021-04-01_2024-10-30.csv")
 
         # Ensure 'park_id' is treated as categorical by converting it to string
         self.mock_data['park_id'] = self.mock_data['park_id'].astype(str)

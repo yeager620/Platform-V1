@@ -7,7 +7,7 @@ import pandas as pd
 
 def main():
     # Define paths and parameters
-    dataset_path = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.1-full/v1.1-n4775-game-vectors_2021-04-01_2024-10-30.csv"  # Path to your existing dataset
+    dataset_path = "/y-data/v1.1-full/v1.1-n4710-game-vectors_2021-04-01_2024-10-30.csv"  # Path to your existing dataset
     target_column = "Home_Win"  # Replace with your actual target column name
     moneyline_columns = ["home_odds", "away_odds"]  # Replace with your actual moneyline column names
 
@@ -16,14 +16,12 @@ def main():
         dataset_path=dataset_path,
         target_column=target_column,
         moneyline_columns=moneyline_columns,
-        days_ahead=100,
+        days_ahead=7,
         max_concurrent_requests=10,
-        update_interval=300,  # 5 minutes
+        update_interval=3600,  # 1 hour
         model_type="xgboost",
-        initial_train_size=0.2,
-        kelly_fraction=1.0,
-        output_folder="./reports",
-        random_state=42
+        output_folder="/Users/yeager/Desktop/Maquoketa-Platform-V1/MaqAnalytics/MaqLive/live-reports",
+        random_state=28
     )
 
     # Run the Engine

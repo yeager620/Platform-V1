@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Set
 
 
 class LiveGamelogsFetcher:
-    def __init__(self, days_ahead: int = 30, max_concurrent_requests: int = 10):
+    def __init__(self, days_ahead: int = 7, max_concurrent_requests: int = 10):
         """
         Initialize the fetcher.
 
