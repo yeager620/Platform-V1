@@ -20,6 +20,7 @@ from sklearn.pipeline import Pipeline
 
 from MaqAnalytics.VectorConstructor.DataPipeline import DataPipeline
 
+
 class Engine:
     def __init__(
             self,
@@ -32,6 +33,7 @@ class Engine:
             callback: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
             model_type: str = "xgboost",
             output_folder: str = "/Users/yeager/Desktop/Maquoketa-Platform-V1/MaqAnalytics/MaqLive/live-reports",
+            live_data_folder: str = "/Users/yeager/Desktop/Maquoketa-Platform-V1/MaqAnalytics/MaqLive/live-data",
             random_state: int = 28,
     ):
         """
@@ -54,13 +56,16 @@ class Engine:
         self.moneyline_columns = moneyline_columns
         self.days_ahead = days_ahead
         self.update_interval = update_interval
+        self.output_folder = output_folder
+        self.live_data_folder = live_data_folder
 
         self.data = self.load_dataset()
 
         excluded_columns = self.moneyline_columns + [self.target_column, 'Game_Date', 'Game_PK']
         self.feature_columns = [col for col in self.data.columns if col not in excluded_columns]
 
-        self.data_pipeline = DataPipeline(datetime.date.today().strftime("%Y-%m-%d"), (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"))
+        self.data_pipeline = DataPipeline(datetime.date.today().strftime("%Y-%m-%d"),
+                                          (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"))
         self.unlabeled_vector_df = self.data_pipeline.process_games()
 
         # Train the model on 100% of the data
@@ -72,6 +77,8 @@ class Engine:
         self.model_type = model_type
         self.output_folder = output_folder
         self.random_state = random_state
+
+        self.predictions_df = pd.DataFrame()
 
         self.pipeline = None
         self.preprocessor = None
@@ -253,6 +260,25 @@ class Engine:
         # Add the probabilities to the DataFrame
         self.unlabeled_vector_df['Home_Win'] = probabilities
         self.unlabeled_vector_df.sort_values(by='Game_Date', inplace=True)
+
+        self.predictions_df = self.unlabeled_vector_df[[
+            'Game_PK', 'Game_Date', 'Home_Team_Abbr', 'Away_Team_Abbr',
+            self.moneyline_columns[0], self.moneyline_columns[1],
+            'home_odds_decimal', 'away_odds_decimal',
+            'home_implied_prob', 'away_implied_prob',
+            'home_wager_percentage', 'home_wager_percentage'
+            'Home_Win'
+        ]]
+        self.predictions_df.rename(columns={'Home_Win': 'Home_Win_Prob_Theo'})
+        self.predictions_df['Away_Win_Prob_Theo'] = 1 - self.predictions_df['Home_Win_Prob_Theo']
+
+        output_file = os.path.join(
+            self.live_data_folder,
+            "live_predictions.csv"  # Fixed filename
+        )
+        os.makedirs(self.output_folder, exist_ok=True)
+        self.predictions_df.to_csv(output_file, index=False)
+        print(f"Updated {output_file}")
 
     def update_and_predict(self):
         """
