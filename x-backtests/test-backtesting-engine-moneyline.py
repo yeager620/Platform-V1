@@ -29,7 +29,7 @@ class TestBacktestingEngineXGBoost(unittest.TestCase):
                 target_column=self.target_column,
                 moneyline_columns=self.moneyline_columns,
                 model_type='xgboost',
-                initial_train_size=0.75,
+                initial_train_size=0.77,
                 random_state=28
             )
 

@@ -99,7 +99,7 @@ class BacktestingEngine:
 
         # Define preprocessing steps
         numerical_transformer = Pipeline(steps=[
-            ("imputer", SimpleImputer(strategy="mean")),
+            # ("imputer", SimpleImputer(strategy="mean")),
             ("scaler", StandardScaler())
 
         ])
@@ -133,6 +133,7 @@ class BacktestingEngine:
     def split_data(self):
         total_games = len(self.data)
         initial_train_end = int(total_games * self.initial_train_size)
+        # initial_train_start = int(total_games * 0.25)
 
         self.initial_train_data = self.data.iloc[:initial_train_end].copy()
         self.backtest_data = self.data.iloc[initial_train_end:].copy()

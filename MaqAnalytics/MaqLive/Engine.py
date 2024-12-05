@@ -7,13 +7,18 @@ import time
 from typing import List, Dict, Any, Optional, Callable
 
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
 import xgboost as xgb
 from sklearn.model_selection import StratifiedKFold, cross_val_score
+from transformers import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 
-from .LiveGamelogsFeed import LiveGamelogsFeed
-from MaqAnalytics.VectorConstructor.SavantVectorGenerator import SavantVectorGenerator
-
+from MaqAnalytics.VectorConstructor.DataPipeline import DataPipeline
 
 class Engine:
     def __init__(
@@ -47,20 +52,21 @@ class Engine:
         self.dataset_path = dataset_path
         self.target_column = target_column
         self.moneyline_columns = moneyline_columns
+        self.days_ahead = days_ahead
+        self.update_interval = update_interval
 
         self.data = self.load_dataset()
-        self.savant_vector_generator = SavantVectorGenerator(datetime.date.today().strftime("%Y-%m-%d"), (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"))
+
+        excluded_columns = self.moneyline_columns + [self.target_column, 'Game_Date', 'Game_PK']
+        self.feature_columns = [col for col in self.data.columns if col not in excluded_columns]
+
+        self.data_pipeline = DataPipeline(datetime.date.today().strftime("%Y-%m-%d"), (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"))
+        self.unlabeled_vector_df = self.data_pipeline.process_games()
 
         # Train the model on 100% of the data
+        self.preprocess_data()
+        self.initialize_model(model_type, random_state)
         self.train_model()
-
-        # Initialize LiveGamelogsFeed
-        self.live_feed = LiveGamelogsFeed(
-            days_ahead=days_ahead,
-            max_concurrent_requests=max_concurrent_requests,
-            update_interval=update_interval,
-            callback=self.on_gamelogs_update  # Use internal callback
-        )
 
         # Store parameters for reporting or further use
         self.model_type = model_type
@@ -68,6 +74,7 @@ class Engine:
         self.random_state = random_state
 
         self.pipeline = None
+        self.preprocessor = None
 
     def load_dataset(self) -> pd.DataFrame:
         """
@@ -83,6 +90,62 @@ class Engine:
 
         return data
 
+    def preprocess_data(self):
+        # Preprocessing code remains the same
+        if 'Game_Date' in self.data.columns:
+            self.data.sort_values(by='Game_Date', inplace=True)
+        else:
+            raise ValueError("Data must contain a 'Game_Date' column for chronological sorting.")
+
+        # Ensure 'park_id' is treated as a categorical variable by converting it to string
+        if 'park_id' in self.data.columns:
+            self.data['park_id'] = self.data['park_id'].astype(str)
+
+        # Drop rows with missing moneyline values
+        self.data.dropna(subset=self.moneyline_columns, inplace=True)
+
+        # Separate features and target
+        X = self.data.drop(columns=[self.target_column, "Game_Date", "Game_PK"])
+        y = self.data[self.target_column]
+
+        # Identify numerical and categorical columns
+        numerical_cols = [
+            col for col in X.select_dtypes(include=["int64", "float64"]).columns
+            if col not in self.moneyline_columns
+        ]
+        categorical_cols = [
+            col for col in X.select_dtypes(include=["object", "category", "bool"]).columns
+            if col not in self.moneyline_columns
+        ]
+
+        # Define preprocessing steps
+        numerical_transformer = Pipeline(steps=[
+            # ("imputer", SimpleImputer(strategy="mean")),
+            ("scaler", StandardScaler())
+        ])
+
+        categorical_transformer = Pipeline(steps=[
+            ("onehot", OneHotEncoder(handle_unknown="ignore"))
+        ])
+
+        # Combine transformers using ColumnTransformer
+        preprocessor = ColumnTransformer(
+            transformers=[
+                ("num", numerical_transformer, numerical_cols),
+                ("cat", categorical_transformer, categorical_cols),
+            ]
+        )
+
+        # Save the preprocessor for future use
+        self.preprocessor = preprocessor
+
+        # Save features and target
+        self.X = X
+        self.y = y
+
+        # Save feature names after preprocessing
+        # self.feature_names = self.get_feature_names()
+
     def initialize_model(self, model_type: str, random_state: int):
         """
         Initialize the machine learning model based on the specified type.
@@ -92,24 +155,28 @@ class Engine:
         :return: Initialized machine learning model.
         """
         model_type = model_type.lower()
-        if model_type == "logistic_regression":
-            model = LogisticRegression(random_state=random_state)
-        elif model_type == "xgboost":
-            model = xgb.XGBClassifier(
+        if model_type == "xgboost":
+            base_model = xgb.XGBClassifier(
                 eval_metric='logloss',
                 random_state=random_state
             )
         else:
             raise ValueError(f"Model type '{model_type}' is not supported.")
 
-        return model
+        calibrated_model = CalibratedClassifierCV(estimator=base_model, method='sigmoid', cv=3)
+
+        # Create a pipeline that first preprocesses the data and then fits the calibrated model
+        self.pipeline = Pipeline(steps=[
+            ("preprocessor", self.preprocessor),
+            ("calibrated_classifier", calibrated_model)
+        ])
 
     def train_model(self):
         """
-        Prepare data and train the machine learning model.
+        Train the model.
         """
-
-        pass
+        self.pipeline.fit(self.X, self.y)
+        print("Model training completed.")
 
     def perform_cross_validation(self, combined_df: pd.DataFrame, cv_folds: int = 5):
         """
@@ -118,7 +185,7 @@ class Engine:
         :param combined_df: DataFrame containing features and target variables.
         :param cv_folds: Number of cross-validation folds.
         """
-        features = combined_df.drop(columns=["Home_Win", "Game_Date", "Game_PK", "Home_Team_Name", "Away_Team_Name"])
+        features = combined_df.drop(columns=["Home_Win", "Game_Date", "Game_PK"])
         target = combined_df["Home_Win"]
 
         # Define a pipeline consistent with LiveGamePredictor's preprocessing
@@ -131,75 +198,94 @@ class Engine:
         print(f"Cross-validation ROC-AUC scores: {scores}")
         print(f"Mean ROC-AUC: {scores.mean():.4f} | Std: {scores.std():.4f}")
 
-    def on_gamelogs_update(self, updated_gamelogs: List[Dict[str, Any]]):
+    def generate_feature_vectors(self):
+        self.unlabeled_vector_df = self.data_pipeline.process_games()
+        new_finished_games = self.unlabeled_vector_df[self.unlabeled_vector_df['home_win'].isin([0, 1])]
+        if not new_finished_games.empty:
+            print(f"Found {len(new_finished_games)} new finished games.")
+
+            # Remove finished games from unlabeled_vector_df
+            self.unlabeled_vector_df = self.unlabeled_vector_df[
+                ~self.unlabeled_vector_df['Game_PK'].isin(new_finished_games['Game_PK'])
+            ]
+
+            # Append new finished games to the dataset CSV file
+            # Load existing dataset
+            existing_data = self.load_dataset()
+
+            # Concatenate existing data with new finished games
+            combined_data = pd.concat([existing_data, new_finished_games], ignore_index=True)
+
+            # Sort chronologically
+            combined_data.sort_values(by='Game_Date', inplace=True)
+
+            # Save back to CSV
+            combined_data.to_csv(self.dataset_path, index=False)
+            print("New finished games appended to the dataset.")
+
+            # Re-load and preprocess data
+            self.data = self.load_dataset()
+            self.preprocess_data()
+
+            # Re-train the model
+            self.train_model()
+            print("Model retrained with new data.")
+
+            # Sort unlabeled_vector_df for upcoming predictions
+        if self.unlabeled_vector_df is not None:
+            self.unlabeled_vector_df.sort_values(by='Game_Date', inplace=True)
+
+    def predict_live_games(self):
         """
-        Callback function that gets called when gamelogs are updated.
-
-        :param updated_gamelogs: List of updated gamelog data.
+        Predict the outcomes of upcoming games.
         """
-        print(f"Engine: Received {len(updated_gamelogs)} updated gamelogs.")
-        self.process_all_upcoming(updated_gamelogs)
+        if self.unlabeled_vector_df is None or self.pipeline is None:
+            print("No data to predict or model not trained.")
+            return
 
-    def process_all_upcoming(self, gamelogs: List[Dict[str, Any]]):
+        # Prepare the data (unlabeled data)
+        X_live = self.unlabeled_vector_df.drop(columns=[self.target_column, "Game_Date", "Game_PK"],
+                                               errors='ignore')
+
+        # Predict probabilities using the pipeline (which includes preprocessing)
+        probabilities = self.pipeline.predict_proba(X_live)[:, 1]  # Probability of Home_Win == 1
+
+        # Add the probabilities to the DataFrame
+        self.unlabeled_vector_df['Home_Win'] = probabilities
+        self.unlabeled_vector_df.sort_values(by='Game_Date', inplace=True)
+
+    def update_and_predict(self):
         """
-        Make predictions on the upcoming games and process the results.
-
-        :param gamelogs: List of gamelog data for upcoming games.
+        Method to update data and make predictions. This replaces the previous callback mechanism.
         """
-        predictions = {}
-        for gamelog in gamelogs:
-            game_pk = gamelog.get('scoreboard', {}).get('gamePk', None)
-            if not game_pk:
-                continue
-
-            # Extract features required for prediction
-            game_features = self.generate_feature_vector(gamelog)
-
-            if game_features is None:
-                print(f"Engine: Missing features for game PK {game_pk}. Skipping prediction.")
-                continue
-
-            # Predict probability of home win
-            proba_home_win = self.predict_live_game(game_pk)
-
-            # Make a prediction based on the probability
-            predicted_outcome = 'home_win' if proba_home_win >= 0.5 else 'away_win'
-
-            # Prepare prediction result
-            predictions[game_pk] = {
-                'prob_home_win': proba_home_win,
-                'predicted_outcome': predicted_outcome,
-                'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-
-    def generate_feature_vector(self, gamelog):
-
-        return
-
-    def predict_live_game(self, game_pk):
-        pass
+        print("Updating data and generating new predictions...")
+        # Update the data pipeline's date range
+        self.data_pipeline = DataPipeline(
+            datetime.date.today().strftime("%Y-%m-%d"),
+            (datetime.date.today() + datetime.timedelta(days=self.days_ahead)).strftime("%Y-%m-%d")
+        )
+        self.generate_feature_vectors()
+        self.predict_live_games()
 
     def run(self):
         """
-        Run the Engine by starting the live gamelogs feed.
+        Run the Engine by periodically updating data and making predictions.
         """
         print("Starting Engine...")
-        # Start the live feed in a separate thread to allow concurrent execution
-        feed_thread = threading.Thread(target=self.live_feed.start_feed, daemon=True)
-        feed_thread.start()
 
-        print("Engine is running. Press Ctrl+C to stop.")
+        def periodic_update():
+            while True:
+                self.update_and_predict()
+                time.sleep(self.update_interval)
+
+        # Start the periodic update in a separate thread
+        update_thread = threading.Thread(target=periodic_update, daemon=True)
+        update_thread.start()
+
+        print(f"Engine is running. Updates every {self.update_interval} seconds. Press Ctrl+C to stop.")
         try:
             while True:
-                # Keep the main thread alive to allow background thread to run
-                signal.pause()
-        except AttributeError:
-            # signal.pause() is not available on some platforms like Windows
-            while True:
-                try:
-                    time.sleep(1)
-                except KeyboardInterrupt:
-                    print("\nEngine stopped by user.")
-                    break
+                # Keep the main thread alive
+                time.sleep(1)
         except KeyboardInterrupt:
             print("\nEngine stopped by user.")

@@ -820,7 +820,9 @@ class SavantVectorGenerator:
                 home_runs = game_json['scoreboard']['linescore']['teams']['home']['runs']
                 away_runs = game_json['scoreboard']['linescore']['teams']['away']['runs']
                 # Determine if home team won
-                home_win = 1 if home_runs >= away_runs else 0
+                home_win = 1 if home_runs > away_runs else 0
+                if home_runs == away_runs:
+                    home_win = None
                 game_outcome[game_pk] = home_win
             except Exception as e:
                 print(f"Error processing game_pk {game_pk}: {e}")
