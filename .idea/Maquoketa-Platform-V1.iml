@@ -13,6 +13,8 @@
       <sourceFolder url="file://$MODULE_DIR$/MaqAnalytics/MaqHistorical" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/MaqAnalytics/MaqLive" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/MaqAnalytics/VectorConstructor" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/y-data" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/y-data/v1.1-full" isTestSource="false" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.11" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

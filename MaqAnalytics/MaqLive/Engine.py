@@ -1,6 +1,6 @@
 import os
 import datetime
-from datetime import datetime
+from datetime import datetime, timedelta
 import signal
 import threading
 import time
@@ -64,24 +64,31 @@ class Engine:
         excluded_columns = self.moneyline_columns + [self.target_column, 'Game_Date', 'Game_PK']
         self.feature_columns = [col for col in self.data.columns if col not in excluded_columns]
 
-        self.data_pipeline = DataPipeline(datetime.date.today().strftime("%Y-%m-%d"),
-                                          (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"))
-        self.unlabeled_vector_df = self.data_pipeline.process_games()
+        self.data_pipeline = DataPipeline(datetime.today().strftime("%Y-%m-%d"),
+                                          (datetime.today() + timedelta(days=7)).strftime("%Y-%m-%d"))
+        if not self.data_pipeline.savant_converter.gamelogs:
+            print(f"MaqLive Engine: No games found for the next {self.days_ahead} days")
+        try:
+            self.unlabeled_vector_df = self.data_pipeline.process_games()
 
-        # Train the model on 100% of the data
-        self.preprocess_data()
-        self.initialize_model(model_type, random_state)
-        self.train_model()
+            # Train the model on 100% of the data
+            self.preprocess_data()
+            self.initialize_model(model_type, random_state)
+            self.train_model()
 
-        # Store parameters for reporting or further use
-        self.model_type = model_type
-        self.output_folder = output_folder
-        self.random_state = random_state
+            # Store parameters for reporting or further use
+            self.model_type = model_type
+            self.output_folder = output_folder
+            self.random_state = random_state
 
-        self.predictions_df = pd.DataFrame()
+            self.predictions_df = pd.DataFrame()
 
-        self.pipeline = None
-        self.preprocessor = None
+            self.pipeline = None
+            self.preprocessor = None
+
+        except Exception as e:
+            print(f"{len(self.data_pipeline.savant_converter.gamelogs)} upcoming games found")
+            print(f"Error that occurred: {e}")
 
     def load_dataset(self) -> pd.DataFrame:
         """
@@ -292,6 +299,18 @@ class Engine:
         )
         self.generate_feature_vectors()
         self.predict_live_games()
+
+    def get_predictions(self) -> Dict[int, Dict]:
+        """
+        Return the meaningful data as a dictionary with Game_PK as keys.
+        """
+        if self.predictions_df is not None and not self.predictions_df.empty:
+            # Convert the DataFrame to a dictionary with Game_PK as keys
+            predictions_dict = self.predictions_df.set_index('Game_PK').to_dict('index')
+            return predictions_dict
+        else:
+            print("No predictions available.")
+            return {}
 
     def run(self):
         """

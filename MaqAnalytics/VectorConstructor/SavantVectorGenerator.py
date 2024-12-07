@@ -829,7 +829,10 @@ class SavantVectorGenerator:
                 game_outcome[game_pk] = None  # Default to None if error occurs
 
         # Map the 'Game_PK' column to 'Home_Win' using the game_outcome dictionary
-        retrosheet_df['Home_Win'] = retrosheet_df['Game_PK'].map(game_outcome).fillna(0).astype(int)
+        if not retrosheet_df.empty:
+            retrosheet_df['Home_Win'] = retrosheet_df['Game_PK'].map(game_outcome).fillna(0).astype(int)
+        else:
+            print("VectorConstructor: No games / game outcomes found")
 
         return retrosheet_df
 
