@@ -189,7 +189,7 @@ class BacktestingEngine:
             }
         elif self.model_type == "xgboost":
             param_grid = {
-                "classifier__n_estimators": [25, 50, 75],
+                "classifier__n_estimators": [10, 25, 50, 75],
                 "classifier__max_depth": [2, 3, 4],
                 "classifier__learning_rate": [0.1, 0.2, 0.3]
             }

@@ -10,7 +10,7 @@ class TestBacktestingEngineXGBoost(unittest.TestCase):
         """
         # Read the cleaned mock data into a DataFrame
         self.mock_data = pd.read_csv(
-            "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/v1.2.1-game-vectors_2021-04-01_2024-10-30.csv")
+            "/v1.2-full/v1.2-game-vectors_2021-04-01_2024-10-30.csv")
 
         # Ensure 'park_id' is treated as categorical by converting it to string
         self.mock_data['park_id'] = self.mock_data['park_id'].astype(str)

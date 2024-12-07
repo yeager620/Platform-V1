@@ -14,7 +14,7 @@ Total Profit: 18816876635827.727
 Return on Investment (ROI %): 188168766358.27728
 Total Bets: 87
 Total Wins: 72
-Win Rate (%): 82.75862068965517
+Win Rate (%): 82.758620689655170.1
 Final Bankroll: 18816876645827.727
 T-Test Statistic: 1.0003820809786643
 T-Test p-value: 0.15998252293567397
