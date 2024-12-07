@@ -1,0 +1,81 @@
+Backtesting Report
+==================
+
+Total number of games in dataset: 4710
+Total number of days in dataset: 465
+Initial training size: 70.0%
+
+Kelly fraction used: 1.0 (Full Kelly)
+
+Backtest Evaluation Metrics:
+Total Profit: 1249932796412882.8
+Return on Investment (ROI %): 12499327964128.83
+Total Bets: 135
+Total Wins: 104
+Win Rate (%): 77.03703703703704
+Final Bankroll: 1249932796422883.0
+T-Test Statistic: 0.5360914060845776
+T-Test p-value: 0.2963954195753765
+Wilcoxon Test Statistic: 6496.0
+Wilcoxon Test p-value: 5.8593573056397875e-06
+Mann-Whitney U Statistic: 13802.0
+Mann-Whitney U p-value: 2.1879062675628276e-16
+Model Brier Score: 0.1901320350073617
+Bookmaker Brier Score: 0.23813361986941553
+Model Log Loss: 0.5625598064239934
+Bookmaker Log Loss: 0.6688926793374861
+Model AUC: 0.7850967277755225
+Bookmaker AUC: 0.6227576560245346
+Diebold-Mariano Statistic: -10.444805013850893
+Diebold-Mariano p-value: 1.0
+
+Model Accuracy Metrics:
+Accuracy: 0.7211606510969568
+Precision: 0.715158924205379
+Recall: 0.7841823056300268
+F1-Score: 0.748081841432225
+ROC-AUC: 0.7850967277755225
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.73      0.65      0.69       667
+           1       0.72      0.78      0.75       746
+
+    accuracy                           0.72      1413
+   macro avg       0.72      0.72      0.72      1413
+weighted avg       0.72      0.72      0.72      1413
+
+Confusion Matrix:
+[[434 233]
+ [161 585]]
+
+Top 20 Feature Importances:
+                       Feature  Importance
+num__Away_SP_saveOpportunities    0.041057
+            num__Away_SP_saves    0.031386
+    num__Away_SP_gamesFinished    0.020718
+        num__home_implied_prob    0.020546
+        num__away_odds_decimal    0.020190
+            num__Home_SP_saves    0.018036
+        num__home_odds_decimal    0.017213
+num__Home_SP_saveOpportunities    0.014369
+     num__Away_SP_gamesStarted    0.013638
+    num__home_wager_percentage    0.012342
+            num__Away_B_atBats    0.012337
+    num__Home_P_inningsPitched    0.010090
+           num__Away_B_flyOuts    0.009889
+        num__Home_P_strikeOuts    0.009587
+          num__Away_SP_doubles    0.009069
+    num__away_wager_percentage    0.009062
+          num__Home_B_sacFlies    0.008877
+          num__Away_SP_triples    0.008790
+            num__Away_SP_holds    0.008663
+            num__Home_SP_balls    0.008579
+
+Additional Information:
+Model Type: xgboost
+Random State: 28
+Report Generated on: 2024-12-06_19-17-36
+
+Calibration plot saved as 'calibration_plot_2024-12-06_19-17-36.png' in the output folder.

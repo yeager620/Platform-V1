@@ -6,6 +6,7 @@ Total number of days in dataset: 465
 Initial training size: 75.0%
 
 Kelly fraction used: 1.0 (Full Kelly)
+Daily model updates: True
 
 Backtest Evaluation Metrics:
 Total Profit: 15271306762699.074

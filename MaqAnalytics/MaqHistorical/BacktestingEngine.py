@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 
 from sklearn.impute import SimpleImputer
+from sklearn.model_selection import GridSearchCV
 from tqdm import tqdm
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
@@ -33,15 +34,16 @@ warnings.filterwarnings("ignore")
 
 class BacktestingEngine:
     def __init__(
-        self,
-        data: pd.DataFrame,
-        target_column: str,
-        moneyline_columns: list,
-        model_type: str = "logistic_regression",
-        initial_train_size: float = 0.2,
-        kelly_fraction: float = 1.0,  # Full Kelly by default
-        output_folder: str = "/Users/yeager/Desktop/Maquoketa-Platform-V1/x-backtests/automated-reports",
-        random_state: int = 42,
+            self,
+            data: pd.DataFrame,
+            target_column: str,
+            moneyline_columns: list,
+            model_type: str = "logistic_regression",
+            initial_train_size: float = 0.2,
+            kelly_fraction: float = 1.0,  # Full Kelly by default
+            update_model: bool = True,
+            output_folder: str = "/Users/yeager/Desktop/Maquoketa-Platform-V1/x-backtests/automated-reports",
+            random_state: int = 42,
     ):
         self.data = data.copy()
         self.target_column = target_column
@@ -51,6 +53,7 @@ class BacktestingEngine:
         self.kelly_fraction = kelly_fraction
         self.output_folder = output_folder
         self.random_state = random_state
+        self.update_model_daily = update_model
 
         # Initialize placeholders
         self.model = None
@@ -58,6 +61,7 @@ class BacktestingEngine:
         self.initial_train_data = None
         self.backtest_data = None
         self.feature_names = None  # For feature importance
+        self.best_params = None
 
         # Initialize placeholders for probabilities and actual outcomes
         self.all_model_probs = []
@@ -163,16 +167,85 @@ class BacktestingEngine:
             raise ValueError(f"Model type '{self.model_type}' is not supported.")
 
         # Wrap the base model with CalibratedClassifierCV for probability calibration
-        calibrated_model = CalibratedClassifierCV(estimator=base_model, method='sigmoid', cv=3)
+        # calibrated_model = CalibratedClassifierCV(estimator=base_model, method='sigmoid', cv=3)
 
         # Create a pipeline that first preprocesses the data and then fits the calibrated model
+        self.pipeline = Pipeline(steps=[
+            ("preprocessor", self.preprocessor),
+            ("classifier", base_model)
+        ])
+
+    def train_model(self):
+        self.pipeline.fit(self.X_train, self.y_train)
+
+    def tune_hyperparameters(self):
+        # Define parameter grids for different model types
+        # Adjust these to your liking
+        if self.model_type == "logistic_regression":
+            param_grid = {
+                "classifier__C": [0.01, 0.1, 1, 10],
+                "classifier__penalty": ["l2"],
+                "classifier__solver": ["lbfgs"]
+            }
+        elif self.model_type == "xgboost":
+            param_grid = {
+                "classifier__n_estimators": [25, 50, 75],
+                "classifier__max_depth": [2, 3, 4],
+                "classifier__learning_rate": [0.1, 0.2, 0.3]
+            }
+        elif self.model_type == "random_forest":
+            param_grid = {
+                "classifier__n_estimators": [100, 200],
+                "classifier__max_depth": [None, 5, 10],
+                "classifier__max_features": ["sqrt", "log2"]
+            }
+        elif self.model_type == "gradient_boosting":
+            param_grid = {
+                "classifier__n_estimators": [50, 100],
+                "classifier__learning_rate": [0.01, 0.1],
+                "classifier__max_depth": [3, 5]
+            }
+        elif self.model_type == "svm":
+            param_grid = {
+                "classifier__C": [0.1, 1, 10],
+                "classifier__kernel": ["linear", "rbf"]
+            }
+        else:
+            # If no grid defined, skip tuning
+            return
+
+        print("Starting hyperparameter tuning on initial training data...")
+        grid_search = GridSearchCV(
+            estimator=self.pipeline,
+            param_grid=param_grid,
+            cv=3,  # 3-fold cross-validation
+            scoring='neg_log_loss',
+            n_jobs=-1,
+            verbose=1
+        )
+
+        grid_search.fit(self.X_train, self.y_train)
+
+        self.best_params = grid_search.best_params_
+
+        print("Best hyperparameters found:", grid_search.best_params_)
+
+        # Update pipeline with best parameters
+        self.pipeline = grid_search.best_estimator_
+
+        # Now wrap the best found classifier with CalibratedClassifierCV
+        best_classifier = self.pipeline.named_steps['classifier']
+        calibrated_model = CalibratedClassifierCV(estimator=best_classifier, method='sigmoid', cv=3)
+
+        # Rebuild pipeline with calibration
         self.pipeline = Pipeline(steps=[
             ("preprocessor", self.preprocessor),
             ("calibrated_classifier", calibrated_model)
         ])
 
-    def train_model(self):
+        # Fit once to calibrate with the initial training set
         self.pipeline.fit(self.X_train, self.y_train)
+        print("Hyperparameter tuning and calibration complete.\n")
 
     def update_model(self, X_new, y_new):
         self.X_train = pd.concat([self.X_train, X_new], ignore_index=True)
@@ -203,7 +276,11 @@ class BacktestingEngine:
 
     def run_backtest(self, initial_bankroll: float = 10000.0):
         print("Training the initial model...")
-        self.train_model()
+
+        # self.train_model()
+
+        self.tune_hyperparameters()
+
         print("Initial training completed.\n")
 
         bankroll = initial_bankroll
@@ -325,7 +402,8 @@ class BacktestingEngine:
             y_new = pd.Series(actual_outcomes)
 
             # Update the model with the outcomes of all games on this date
-            self.update_model(X_new=X_new, y_new=y_new)
+            if self.update_model_daily:
+                self.update_model(X_new=X_new, y_new=y_new)
 
         # Store probabilities and actual outcomes for all games
         self.all_model_probs = all_model_probs
@@ -466,7 +544,8 @@ class BacktestingEngine:
         plt.plot(prob_pred_model, prob_true_model, marker='o', label='Model')
 
         # Bookmaker Calibration
-        prob_pred_book, prob_true_book = calibration_curve(self.all_actual_outcomes, self.all_bookmaker_probs, n_bins=10)
+        prob_pred_book, prob_true_book = calibration_curve(self.all_actual_outcomes, self.all_bookmaker_probs,
+                                                           n_bins=10)
         plt.plot(prob_pred_book, prob_true_book, marker='s', label='Bookmaker')
 
         # Perfect Calibration Line
@@ -595,7 +674,9 @@ class BacktestingEngine:
             total_days = self.data[date_column].nunique()
             f.write(f"Total number of games in dataset: {total_games}\n")
             f.write(f"Total number of days in dataset: {total_days}\n")
-            f.write(f"Initial training size: {self.initial_train_size * 100}%\n\n")
+            f.write(f"Initial training size: {self.initial_train_size * 100}%\n")
+            f.write(f"Best hyperparameters found: {self.best_params}\n")
+            f.write(f"Daily model updates: {self.update_model_daily}\n\n")
 
             kelly_info = f"Kelly fraction used: {self.kelly_fraction} (Full Kelly)\n" if self.kelly_fraction == 1.0 else f"Kelly fraction used: {self.kelly_fraction} (Fractional Kelly)\n"
             f.write(kelly_info)
