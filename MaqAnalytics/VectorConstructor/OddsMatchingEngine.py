@@ -25,7 +25,7 @@ class OddsMatchingEngine:
         Initializes the OddsMatchingEngine with dataframes and outlier parameters.
 
         Parameters:
-            moneylines_df (pd.DataFrame): DataFrame containing moneyline odds data.
+            moneylines_df (pd.DataFrame): DataFrame containing moneyline odds data (must include 'opening_line').
             stat_df (pd.DataFrame, optional): DataFrame containing statistical data.
             player_df (pd.DataFrame, optional): DataFrame containing player data.
             min_odds (float, optional): Minimum decimal odds to retain. Defaults to 1.1.
@@ -130,7 +130,7 @@ class OddsMatchingEngine:
             np.where(
                 moneyline < 0,
                 (100 / np.abs(moneyline)) + 1,
-                1.0  # Represents no payout
+                1.0  # Represents no payout / invalid
             )
         )
         return decimal_odds
@@ -171,10 +171,8 @@ class OddsMatchingEngine:
         Returns:
             float: Implied probability.
         """
-        if pd.isna(odds):
+        if pd.isna(odds) or odds <= 1.0:
             return np.nan
-        if odds <= 1.0:
-            return np.nan  # Invalid decimal odds
         return 1 / odds
 
     def prepare_and_calculate_odds(self):
@@ -183,11 +181,12 @@ class OddsMatchingEngine:
         removing outliers based on specified decimal odds thresholds and statistical measures.
 
         Returns:
-            pd.DataFrame: DataFrame containing processed game odds with both decimal and American formats.
+            pd.DataFrame: DataFrame containing processed game odds with both decimal and American formats,
+                          including opening line columns and implied probabilities.
         """
         logging.info("Starting preparation and calculation of odds.")
 
-        # Standardize team abbreviations
+        # 1) Standardize team abbreviations
         self.moneylines_df['team'] = self.moneylines_df['team'].apply(self.standardize_team_abbr)
         self.moneylines_df['opponent'] = self.moneylines_df['opponent'].apply(self.standardize_team_abbr)
 
@@ -201,7 +200,7 @@ class OddsMatchingEngine:
         if dropped_unknown > 0:
             logging.warning(f"Dropped {dropped_unknown} rows due to 'UNKNOWN' team abbreviations.")
 
-        # Convert 'date' to datetime
+        # 2) Convert 'date' to datetime
         self.moneylines_df['date'] = pd.to_datetime(self.moneylines_df['date'], errors='coerce')
         initial_row_count = len(self.moneylines_df)
         self.moneylines_df.dropna(subset=['date'], inplace=True)
@@ -209,8 +208,10 @@ class OddsMatchingEngine:
             dropped = initial_row_count - len(self.moneylines_df)
             logging.warning(f"Dropped {dropped} rows due to invalid dates.")
 
-        # Clean and convert 'wager_percentage'
-        self.moneylines_df['wager_percentage'] = self.moneylines_df['wager_percentage'].str.replace('%', '', regex=False)
+        # 3) Clean and convert 'wager_percentage'
+        self.moneylines_df['wager_percentage'] = (
+            self.moneylines_df['wager_percentage'].str.replace('%', '', regex=False)
+        )
         self.moneylines_df['wager_percentage'] = self.moneylines_df['wager_percentage'].replace('-', np.nan)
         self.moneylines_df['wager_percentage'] = pd.to_numeric(
             self.moneylines_df['wager_percentage'],
@@ -222,11 +223,15 @@ class OddsMatchingEngine:
         self.moneylines_df['wager_percentage'].fillna(median_wager, inplace=True)
         logging.info(f"Filled NaN wager percentages with median value: {median_wager}")
 
-        # **Convert American odds to Numeric Odds**
+        # -------------------------- Main Odds Conversion ---------------------------
+        # 4) Convert American 'odds' (current odds) to numeric
         self.moneylines_df['numeric_odds'] = self.moneylines_df['odds'].apply(self.convert_odds_to_numeric)
-
-        # **Convert Numeric Odds to Decimal Odds**
+        # 5) Convert numeric to decimal
         self.moneylines_df['decimal_odds'] = self.moneyline_to_decimal(self.moneylines_df['numeric_odds'])
+        # 5b) Calculate implied probability for current odds
+        self.moneylines_df['implied_probability'] = self.moneylines_df['decimal_odds'].apply(
+            self.calculate_implied_odds
+        )
 
         # Drop rows with NaN 'decimal_odds'
         before_drop_na = len(self.moneylines_df)
@@ -235,128 +240,207 @@ class OddsMatchingEngine:
         if dropped_na > 0:
             logging.warning(f"Dropped {dropped_na} rows due to NaN decimal_odds.")
 
-        # **Create a unique game identifier before any filtering**
+        # ------------------------- Opening Line Conversion --------------------------
+        # Make sure 'opening_line' column exists; if not, create a placeholder
+        if 'opening_line' not in self.moneylines_df.columns:
+            logging.warning("'opening_line' column not found in moneylines_df. Creating empty column.")
+            self.moneylines_df['opening_line'] = np.nan
+
+        # Convert 'opening_line' to American numeric
+        self.moneylines_df['opening_numeric_odds'] = self.moneylines_df['opening_line'].apply(
+            self.convert_odds_to_numeric
+        )
+        # Convert to decimal
+        self.moneylines_df['opening_decimal_odds'] = self.moneyline_to_decimal(
+            self.moneylines_df['opening_numeric_odds']
+        )
+        # Calculate implied probability for opening lines
+        self.moneylines_df['opening_implied_probability'] = self.moneylines_df['opening_decimal_odds'].apply(
+            self.calculate_implied_odds
+        )
+        # We won't drop rows if opening_decimal_odds is NaN.
+
+        # 6) Create a unique game identifier
         self.moneylines_df['game_id'] = self.moneylines_df.apply(
             lambda row: f"{row['date'].strftime('%Y-%m-%d')}_{'_'.join(sorted([row['team'], row['opponent']]))}",
             axis=1
         )
         logging.debug("Created 'game_id' for all rows.")
 
-        # **Remove outliers based on decimal odds**
-        # Define acceptable range in decimal odds corresponding to min_odds and max_odds
-        # min_odds and max_odds are already in decimal format
+        # 7) Remove outliers for main 'decimal_odds' based on min/max
         condition = self.moneylines_df['decimal_odds'].between(self.min_odds, self.max_odds, inclusive='both')
         before_filter = len(self.moneylines_df)
         self.moneylines_df = self.moneylines_df[condition]
         filtered_out = before_filter - len(self.moneylines_df)
         if filtered_out > 0:
             logging.info(
-                f"Filtered out {filtered_out} rows based on decimal odds outside the range [{self.min_odds}, {self.max_odds}].")
+                f"Filtered out {filtered_out} rows based on decimal_odds outside the range [{self.min_odds}, {self.max_odds}].")
 
-        # **Remove statistical outliers using IQR method within each game_id and team**
+        # 8) (Optional) Apply the same min/max filtering to opening_decimal_odds
+        condition_opening = (
+            self.moneylines_df['opening_decimal_odds'].between(self.min_odds, self.max_odds, inclusive='both')
+            | self.moneylines_df['opening_decimal_odds'].isna()
+        )
+        before_filter_opening = len(self.moneylines_df)
+        self.moneylines_df = self.moneylines_df[condition_opening]
+        filtered_opening_out = before_filter_opening - len(self.moneylines_df)
+        if filtered_opening_out > 0:
+            logging.info(
+                f"Filtered out {filtered_opening_out} rows based on opening_decimal_odds outside [{self.min_odds}, {self.max_odds}].")
+
+        # 9) Remove statistical outliers for decimal_odds and opening_decimal_odds
         def remove_statistical_outliers(group):
-            Q1 = group['decimal_odds'].quantile(0.25)
-            Q3 = group['decimal_odds'].quantile(0.75)
-            IQR = Q3 - Q1
-            lower_bound = Q1 - self.iqr_multiplier * IQR
-            upper_bound = Q3 + self.iqr_multiplier * IQR
+            # For main odds
+            Q1_main = group['decimal_odds'].quantile(0.25)
+            Q3_main = group['decimal_odds'].quantile(0.75)
+            IQR_main = Q3_main - Q1_main
+            lower_main = Q1_main - self.iqr_multiplier * IQR_main
+            upper_main = Q3_main + self.iqr_multiplier * IQR_main
+
+            # For opening odds
+            Q1_open = group['opening_decimal_odds'].quantile(0.25)
+            Q3_open = group['opening_decimal_odds'].quantile(0.75)
+            IQR_open = Q3_open - Q1_open
+            lower_open = Q1_open - self.iqr_multiplier * IQR_open
+            upper_open = Q3_open + self.iqr_multiplier * IQR_open
+
             initial_len = len(group)
             filtered_group = group[
-                group['decimal_odds'].between(lower_bound, upper_bound, inclusive='both')
+                group['decimal_odds'].between(lower_main, upper_main, inclusive='both') &
+                (
+                    group['opening_decimal_odds'].between(lower_open, upper_open, inclusive='both')
+                    | group['opening_decimal_odds'].isna()
+                )
             ]
             outliers_removed = initial_len - len(filtered_group)
             if outliers_removed > 0:
                 logging.info(
-                    f"Removed {outliers_removed} statistical outliers from game_id '{group.name[0]}' and team '{group.name[1]}'.")
+                    f"Removed {outliers_removed} outliers in game_id '{group.name}'."
+                )
             return filtered_group
 
-        # Apply statistical outlier removal per game_id and team
-        self.moneylines_df = self.moneylines_df.groupby(['game_id', 'team']).apply(
-            remove_statistical_outliers).reset_index(drop=True)
+        self.moneylines_df = self.moneylines_df.groupby('game_id').apply(remove_statistical_outliers).reset_index(drop=True)
 
-        # Calculate implied probabilities based on decimal odds
-        self.moneylines_df['implied_probability'] = self.moneylines_df['decimal_odds'].apply(
-            self.calculate_implied_odds)
-
-        # Group by game_id
+        # -------------------------------------------------------------------------
+        # 10) Group by game_id to compute averages
+        # -------------------------------------------------------------------------
         grouped_games = self.moneylines_df.groupby('game_id')
-
-        # Initialize list to collect game odds
         game_odds_list = []
-
-        # Get total number of games for progress bar
         total_games = self.moneylines_df['game_id'].nunique()
 
-        # For each game, create a single row with team1 and team2 odds
         for game_id, group in tqdm(grouped_games, total=total_games, desc='Processing games'):
             date = group['date'].iloc[0]
             teams = group['team'].unique()
             if len(teams) != 2:
-                # Skip games that don't have exactly two teams
+                # Skip if not exactly two teams
                 logging.warning(
-                    f"Game ID '{game_id}' skipped due to incorrect number of teams: {len(teams)} teams found.")
+                    f"Game ID '{game_id}' skipped due to incorrect number of teams: {len(teams)}."
+                )
                 continue
             team1, team2 = teams
 
-            # Get data for both teams
+            # Averages for Team 1
             team1_rows = group[group['team'] == team1]
-            team2_rows = group[group['team'] == team2]
-
-            # Calculate averages across sportsbooks for both teams
             team1_avg_decimal_odds = team1_rows['decimal_odds'].mean()
             team1_avg_implied_prob = team1_rows['implied_probability'].mean()
             team1_avg_wager_percentage = team1_rows['wager_percentage'].mean()
 
+            # Opening lines for Team 1
+            team1_avg_opening_decimal_odds = team1_rows['opening_decimal_odds'].mean()
+            team1_avg_opening_implied_prob = team1_rows['opening_implied_probability'].mean()
+
+            # Convert decimal to American
+            team1_avg_moneyline_odds = self.decimal_to_moneyline(team1_avg_decimal_odds)
+            team1_avg_opening_moneyline = self.decimal_to_moneyline(team1_avg_opening_decimal_odds)
+
+            # Averages for Team 2
+            team2_rows = group[group['team'] == team2]
             team2_avg_decimal_odds = team2_rows['decimal_odds'].mean()
             team2_avg_implied_prob = team2_rows['implied_probability'].mean()
             team2_avg_wager_percentage = team2_rows['wager_percentage'].mean()
+
+            # Opening lines for Team 2
+            team2_avg_opening_decimal_odds = team2_rows['opening_decimal_odds'].mean()
+            team2_avg_opening_implied_prob = team2_rows['opening_implied_probability'].mean()
+
+            team2_avg_moneyline_odds = self.decimal_to_moneyline(team2_avg_decimal_odds)
+            team2_avg_opening_moneyline = self.decimal_to_moneyline(team2_avg_opening_decimal_odds)
 
             # Skip if any average odds are NaN
             if pd.isna(team1_avg_decimal_odds) or pd.isna(team2_avg_decimal_odds):
                 logging.warning(f"Game ID '{game_id}' skipped due to NaN in average decimal odds.")
                 continue
 
-            # **Calculate the bookmaker's vig**
-            sum_implied_probs = team1_avg_implied_prob + team2_avg_implied_prob
-
+            # Calculate vig for **current** lines
+            sum_implied_probs = (team1_avg_implied_prob + team2_avg_implied_prob)
             if pd.isna(sum_implied_probs) or sum_implied_probs == 0:
                 logging.warning(
-                    f"Game ID '{game_id}' skipped due to invalid sum of implied probabilities: {sum_implied_probs}")
-                continue  # Skip games with invalid implied probabilities
-
+                    f"Game ID '{game_id}' skipped due to invalid sum of implied probabilities: {sum_implied_probs}"
+                )
+                continue
             vig = sum_implied_probs - 1
 
-            # **Adjust implied probabilities to sum to 1**
+            # Adjust implied probabilities so they sum to 1
             team1_adjusted_implied_prob = team1_avg_implied_prob / sum_implied_probs
             team2_adjusted_implied_prob = team2_avg_implied_prob / sum_implied_probs
 
-            # **Convert average decimal odds back to American odds**
-            team1_avg_moneyline_odds = self.decimal_to_moneyline(team1_avg_decimal_odds)
-            team2_avg_moneyline_odds = self.decimal_to_moneyline(team2_avg_decimal_odds)
+            # --------------------------
+            # Opening line implied probs
+            # --------------------------
+            # We can similarly calculate an 'opening vig' for each game
+            if not pd.isna(team1_avg_opening_implied_prob) and not pd.isna(team2_avg_opening_implied_prob):
+                sum_opening_implied_probs = team1_avg_opening_implied_prob + team2_avg_opening_implied_prob
+                opening_vig = sum_opening_implied_probs - 1
+                # Adjust opening implied probabilities
+                # Avoid dividing by zero if sum_opening_implied_probs <= 0
+                if sum_opening_implied_probs > 0:
+                    team1_opening_adjusted_prob = team1_avg_opening_implied_prob / sum_opening_implied_probs
+                    team2_opening_adjusted_prob = team2_avg_opening_implied_prob / sum_opening_implied_probs
+                else:
+                    team1_opening_adjusted_prob = np.nan
+                    team2_opening_adjusted_prob = np.nan
+                    opening_vig = np.nan
+            else:
+                # If either opening line is NaN, set these to NaN
+                team1_opening_adjusted_prob = np.nan
+                team2_opening_adjusted_prob = np.nan
+                opening_vig = np.nan
 
-            # Create a dictionary for this game
             game_odds = {
                 'game_id': game_id,
                 'date': date,
                 'team1': team1,
                 'team2': team2,
-                'team1_avg_decimal_odds': team1_avg_decimal_odds,
-                'team1_avg_moneyline_odds': team1_avg_moneyline_odds,  # Converted to American odds
-                'team1_avg_implied_prob': team1_adjusted_implied_prob,  # Use adjusted implied probabilities
-                'team1_avg_wager_percentage': team1_avg_wager_percentage,
-                'team2_avg_decimal_odds': team2_avg_decimal_odds,
-                'team2_avg_moneyline_odds': team2_avg_moneyline_odds,  # Converted to American odds
-                'team2_avg_implied_prob': team2_adjusted_implied_prob,  # Use adjusted implied probabilities
-                'team2_avg_wager_percentage': team2_avg_wager_percentage,
-                'vig': vig  # Add the vig to the game dictionary
-            }
 
+                # Current lines
+                'team1_avg_decimal_odds': team1_avg_decimal_odds,
+                'team1_avg_moneyline_odds': team1_avg_moneyline_odds,
+                'team1_avg_implied_prob': team1_adjusted_implied_prob,
+                'team1_avg_wager_percentage': team1_avg_wager_percentage,
+
+                'team2_avg_decimal_odds': team2_avg_decimal_odds,
+                'team2_avg_moneyline_odds': team2_avg_moneyline_odds,
+                'team2_avg_implied_prob': team2_adjusted_implied_prob,
+                'team2_avg_wager_percentage': team2_avg_wager_percentage,
+
+                'vig': vig,
+
+                # Opening lines
+                'team1_avg_opening_decimal_odds': team1_avg_opening_decimal_odds,
+                'team1_avg_opening_moneyline': team1_avg_opening_moneyline,
+                'team1_avg_opening_implied_prob': team1_opening_adjusted_prob,
+
+                'team2_avg_opening_decimal_odds': team2_avg_opening_decimal_odds,
+                'team2_avg_opening_moneyline': team2_avg_opening_moneyline,
+                'team2_avg_opening_implied_prob': team2_opening_adjusted_prob,
+
+                # Additional opening vig if you want it
+                'opening_vig': opening_vig
+            }
             game_odds_list.append(game_odds)
 
-        # Convert list to DataFrame
         game_odds_df = pd.DataFrame(game_odds_list)
 
-        # Debugging: Check if 'game_id' exists and sample data
         if 'game_id' not in game_odds_df.columns:
             logging.error("'game_id' column is missing from game_odds_df.")
         else:
@@ -369,7 +453,7 @@ class OddsMatchingEngine:
 
     def match_game_moneylines_pipelined(self):
         """
-        Matches and appends moneyline odds, their implied probabilities, and the bookmaker's vig to the stat_df.
+        Matches and appends moneyline odds (including opening lines + implied probabilities) to the stat_df.
 
         Returns:
             pd.DataFrame: Merged DataFrame containing statistical data with matched odds.
@@ -395,13 +479,11 @@ class OddsMatchingEngine:
         self.stat_df['Home_Team_Abbr'] = self.stat_df['Home_Team_Abbr'].apply(self.standardize_team_abbr)
         self.stat_df['Away_Team_Abbr'] = self.stat_df['Away_Team_Abbr'].apply(self.standardize_team_abbr)
 
-        # Prepare for merging
         merged_df = self.stat_df.copy()
 
-        # Initialize tqdm for apply
         tqdm.pandas(desc="Matching odds")
 
-        # Function to find matching odds for each game
+        # Helper function to match each row in stat_df to the aggregated game_odds
         def find_matching_odds(row):
             date = row['Game_Date']
             home_team = row['Home_Team_Abbr']
@@ -409,8 +491,6 @@ class OddsMatchingEngine:
 
             # Create game_id
             game_id = f"{date.strftime('%Y-%m-%d')}_{'_'.join(sorted([home_team, away_team]))}"
-
-            # Try to find matching game in game_odds_df
             odds_row = game_odds_df[game_odds_df['game_id'] == game_id]
 
             if odds_row.empty:
@@ -424,68 +504,110 @@ class OddsMatchingEngine:
                     'away_implied_prob': np.nan,
                     'home_wager_percentage': np.nan,
                     'away_wager_percentage': np.nan,
-                    'vig': np.nan
+                    'vig': np.nan,
+
+                    # Opening lines
+                    'home_opening_odds_decimal': np.nan,
+                    'home_opening_odds_american': np.nan,
+                    'away_opening_odds_decimal': np.nan,
+                    'away_opening_odds_american': np.nan,
+                    'home_opening_implied_prob': np.nan,
+                    'away_opening_implied_prob': np.nan,
+                    'opening_vig': np.nan
                 })
 
             odds_row = odds_row.iloc[0]
 
-            # Determine which team is home and assign odds accordingly
+            # Determine which side is home vs away
             if odds_row['team1'] == home_team:
                 home_decimal_odds = odds_row['team1_avg_decimal_odds']
                 home_moneyline_odds = odds_row['team1_avg_moneyline_odds']
                 home_implied_prob = odds_row['team1_avg_implied_prob']
                 home_wager_percentage = odds_row['team1_avg_wager_percentage']
+
+                home_opening_decimal = odds_row['team1_avg_opening_decimal_odds']
+                home_opening_moneyline = odds_row['team1_avg_opening_moneyline']
+                home_opening_implied_prob = odds_row['team1_avg_opening_implied_prob']
+
                 away_decimal_odds = odds_row['team2_avg_decimal_odds']
                 away_moneyline_odds = odds_row['team2_avg_moneyline_odds']
                 away_implied_prob = odds_row['team2_avg_implied_prob']
                 away_wager_percentage = odds_row['team2_avg_wager_percentage']
+
+                away_opening_decimal = odds_row['team2_avg_opening_decimal_odds']
+                away_opening_moneyline = odds_row['team2_avg_opening_moneyline']
+                away_opening_implied_prob = odds_row['team2_avg_opening_implied_prob']
+
             elif odds_row['team2'] == home_team:
                 home_decimal_odds = odds_row['team2_avg_decimal_odds']
                 home_moneyline_odds = odds_row['team2_avg_moneyline_odds']
                 home_implied_prob = odds_row['team2_avg_implied_prob']
                 home_wager_percentage = odds_row['team2_avg_wager_percentage']
+
+                home_opening_decimal = odds_row['team2_avg_opening_decimal_odds']
+                home_opening_moneyline = odds_row['team2_avg_opening_moneyline']
+                home_opening_implied_prob = odds_row['team2_avg_opening_implied_prob']
+
                 away_decimal_odds = odds_row['team1_avg_decimal_odds']
                 away_moneyline_odds = odds_row['team1_avg_moneyline_odds']
                 away_implied_prob = odds_row['team1_avg_implied_prob']
                 away_wager_percentage = odds_row['team1_avg_wager_percentage']
+
+                away_opening_decimal = odds_row['team1_avg_opening_decimal_odds']
+                away_opening_moneyline = odds_row['team1_avg_opening_moneyline']
+                away_opening_implied_prob = odds_row['team1_avg_opening_implied_prob']
             else:
-                # Teams do not match, cannot assign odds
+                # Teams do not match
                 logging.warning(f"Team mismatch for game_id: '{game_id}'")
                 return pd.Series({
                     'home_odds_decimal': np.nan,
-                    'home_odds': np.nan,
+                    'home_odds_american': np.nan,
                     'away_odds_decimal': np.nan,
-                    'away_odds': np.nan,
+                    'away_odds_american': np.nan,
                     'home_implied_prob': np.nan,
                     'away_implied_prob': np.nan,
                     'home_wager_percentage': np.nan,
                     'away_wager_percentage': np.nan,
-                    'vig': np.nan
+                    'vig': np.nan,
+
+                    'home_opening_odds_decimal': np.nan,
+                    'home_opening_odds_american': np.nan,
+                    'away_opening_odds_decimal': np.nan,
+                    'away_opening_odds_american': np.nan,
+                    'home_opening_implied_prob': np.nan,
+                    'away_opening_implied_prob': np.nan,
+                    'opening_vig': np.nan
                 })
 
-            # Include the vig
             vig = odds_row['vig']
+            opening_vig = odds_row['opening_vig']
 
             return pd.Series({
                 'home_odds_decimal': home_decimal_odds,
-                'home_odds': home_moneyline_odds,
+                'home_odds_american': home_moneyline_odds,
                 'away_odds_decimal': away_decimal_odds,
-                'away_odds': away_moneyline_odds,
+                'away_odds_american': away_moneyline_odds,
                 'home_implied_prob': home_implied_prob,
                 'away_implied_prob': away_implied_prob,
                 'home_wager_percentage': home_wager_percentage,
                 'away_wager_percentage': away_wager_percentage,
-                'vig': vig
+                'vig': vig,
+
+                # Opening lines
+                'home_opening_odds_decimal': home_opening_decimal,
+                'home_opening_odds_american': home_opening_moneyline,
+                'away_opening_odds_decimal': away_opening_decimal,
+                'away_opening_odds_american': away_opening_moneyline,
+
+                'home_opening_implied_prob': home_opening_implied_prob,
+                'away_opening_implied_prob': away_opening_implied_prob,
+                'opening_vig': opening_vig
             })
 
-        # Apply the function to each row with progress bar
         odds_data = merged_df.progress_apply(find_matching_odds, axis=1)
-
-        # Concatenate the odds data with the merged_df
         merged_df = pd.concat([merged_df, odds_data], axis=1)
 
-        logging.info("Completed matching of game moneylines to stat_df.")
-
+        logging.info("Completed matching of game moneylines (including opening lines + implied probabilities) to stat_df.")
         return merged_df
 
     def calculate_weighted_average(self, df: pd.DataFrame, weight_column: str) -> dict:

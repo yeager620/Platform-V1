@@ -31,7 +31,7 @@ def process_interval(start_end_tuple):
     """
     start_date, end_date = start_end_tuple
     try:
-        pipeline = DataPipeline(start_date=start_date, end_date=end_date)
+        pipeline = DataPipeline(start_date=start_date, end_date=end_date, version=2)
         result_df = pipeline.process_games()
 
         if result_df is not None and not result_df.empty:
@@ -47,12 +47,12 @@ def process_interval(start_end_tuple):
 
 def main():
     # Define the larger date range
-    overall_start_date = "2021-04-01"
-    overall_end_date = "2022-12-31"
+    overall_start_date = "2023-04-01"
+    overall_end_date = "2024-12-31"
 
     # Define the output directory and final CSV path
     output_directory = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/"
-    final_csv_path = os.path.join(output_directory, f"game_vectors_{overall_start_date}_{overall_end_date}.csv")
+    final_csv_path = os.path.join(output_directory, f"v1.2.6-game_vectors_{overall_start_date}_{overall_end_date}.csv")
     os.makedirs(output_directory, exist_ok=True)
 
     # Generate month-long intervals

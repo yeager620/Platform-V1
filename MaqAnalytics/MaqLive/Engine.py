@@ -8,13 +8,13 @@ from typing import List, Dict, Any, Optional, Callable
 
 import pandas as pd
 import xgboost as xgb
-from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.model_selection import StratifiedKFold, cross_val_score, GridSearchCV
 from transformers import Pipeline
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 
@@ -35,6 +35,7 @@ class Engine:
             output_folder: str = "/Users/yeager/Desktop/Maquoketa-Platform-V1/MaqAnalytics/MaqLive/live-reports",
             live_data_folder: str = "/Users/yeager/Desktop/Maquoketa-Platform-V1/MaqAnalytics/MaqLive/live-data",
             random_state: int = 28,
+            current_time: Optional[datetime] = None,
     ):
         """
         Initialize the Engine class with model training and live feed setup.
@@ -48,9 +49,11 @@ class Engine:
         :param callback: Optional function to call with updated gamelogs.
         :param model_type: Type of model to train ('xgboost', 'random_forest', etc.).
         :param output_folder: Directory to save reports and outputs.
+        :param live_data_folder: Directory to save live data.
         :param random_state: Random state for reproducibility.
+        :param current_time: Optional datetime object to override "now" or "today".
+                             If not provided, use the real current time.
         """
-        # Load and prepare the dataset
         self.dataset_path = dataset_path
         self.target_column = target_column
         self.moneyline_columns = moneyline_columns
@@ -58,60 +61,86 @@ class Engine:
         self.update_interval = update_interval
         self.output_folder = output_folder
         self.live_data_folder = live_data_folder
+        self.random_state = random_state
+        self.model_type = model_type
 
+        # If current_time is None, fall back to the actual current date/time
+        self._current_time = current_time if current_time is not None else datetime.now()
+
+        # Load and prepare the dataset
         self.data = self.load_dataset()
+
+        # We'll use self.get_current_time() anytime we need "today" or "now"
+        self.date = self.get_current_time()
 
         excluded_columns = self.moneyline_columns + [self.target_column, 'Game_Date', 'Game_PK']
         self.feature_columns = [col for col in self.data.columns if col not in excluded_columns]
 
-        self.data_pipeline = DataPipeline(datetime.today().strftime("%Y-%m-%d"),
-                                          (datetime.today() + timedelta(days=7)).strftime("%Y-%m-%d"))
+        # Create a DataPipeline for the time window [today, today + days_ahead]
+        start_date_str = self.get_current_time().strftime("%Y-%m-%d")
+        end_date_str = (self.get_current_time() + timedelta(days=self.days_ahead)).strftime("%Y-%m-%d")
+        self.data_pipeline = DataPipeline(start_date_str, end_date_str)
         if not self.data_pipeline.savant_converter.gamelogs:
             print(f"MaqLive Engine: No games found for the next {self.days_ahead} days")
+
         try:
+            # Attempt to create feature vectors for upcoming games (unlabeled data)
             self.unlabeled_vector_df = self.data_pipeline.process_games()
 
-            # Train the model on 100% of the data
+            # Train the model on historical data
             self.preprocess_data()
             self.initialize_model(model_type, random_state)
             self.train_model()
 
-            # Store parameters for reporting or further use
-            self.model_type = model_type
-            self.output_folder = output_folder
-            self.random_state = random_state
-
+            # Predictions DataFrame will be stored here
             self.predictions_df = pd.DataFrame()
-
-            self.pipeline = None
-            self.preprocessor = None
 
         except Exception as e:
             print(f"{len(self.data_pipeline.savant_converter.gamelogs)} upcoming games found")
             print(f"Error that occurred: {e}")
 
+    def get_current_time(self) -> datetime:
+        """
+        Returns the current engine time.
+        If 'current_time' was given, it returns that fixed time; otherwise returns now().
+        """
+        return self._current_time
+
     def load_dataset(self) -> pd.DataFrame:
         """
-        Load the existing dataset from a CSV file.
-
-        :return: pandas DataFrame containing the dataset.
+        Load the existing dataset from a CSV file, but only keep rows where Game_Date < current engine time.
         """
         if not os.path.exists(self.dataset_path):
             raise FileNotFoundError(f"Dataset file not found at path: {self.dataset_path}")
 
         data = pd.read_csv(self.dataset_path)
-        print(f"Dataset loaded with {len(data)} records.")
+        print(f"Dataset loaded with {len(data)} records before date filtering.")
 
+        # Convert Game_Date to datetime
+        if 'Game_Date' not in data.columns:
+            raise ValueError("Data must contain a 'Game_Date' column.")
+
+        data['Game_Date'] = pd.to_datetime(data['Game_Date'], errors='coerce')
+        data = data.dropna(subset=['Game_Date'])
+
+        # Keep only rows with Game_Date strictly before current_time
+        current_time = self.get_current_time()
+        original_len = len(data)
+        data = data[data['Game_Date'] < current_time]
+        filtered_len = len(data)
+
+        print(f"Filtered out {original_len - filtered_len} future games. "
+              f"{filtered_len} remain for training.")
         return data
 
     def preprocess_data(self):
-        # Preprocessing code remains the same
-        if 'Game_Date' in self.data.columns:
-            self.data.sort_values(by='Game_Date', inplace=True)
-        else:
-            raise ValueError("Data must contain a 'Game_Date' column for chronological sorting.")
+        """
+        Preprocess self.data by sorting, dropping missing moneyline rows, and building transforms.
+        """
+        # Sort by date (already chronological, but just to be safe)
+        self.data.sort_values(by='Game_Date', inplace=True)
 
-        # Ensure 'park_id' is treated as a categorical variable by converting it to string
+        # Convert park_id to string if present
         if 'park_id' in self.data.columns:
             self.data['park_id'] = self.data['park_id'].astype(str)
 
@@ -119,7 +148,7 @@ class Engine:
         self.data.dropna(subset=self.moneyline_columns, inplace=True)
 
         # Separate features and target
-        X = self.data.drop(columns=[self.target_column, "Game_Date", "Game_PK"])
+        X = self.data.drop(columns=[self.target_column, "Game_Date", "Game_PK"], errors='ignore')
         y = self.data[self.target_column]
 
         # Identify numerical and categorical columns
@@ -132,17 +161,15 @@ class Engine:
             if col not in self.moneyline_columns
         ]
 
-        # Define preprocessing steps
+        # Build the transformers
         numerical_transformer = Pipeline(steps=[
-            # ("imputer", SimpleImputer(strategy="mean")),
             ("scaler", StandardScaler())
         ])
-
         categorical_transformer = Pipeline(steps=[
             ("onehot", OneHotEncoder(handle_unknown="ignore"))
         ])
 
-        # Combine transformers using ColumnTransformer
+        # Combine them in a ColumnTransformer
         preprocessor = ColumnTransformer(
             transformers=[
                 ("num", numerical_transformer, numerical_cols),
@@ -150,61 +177,82 @@ class Engine:
             ]
         )
 
-        # Save the preprocessor for future use
         self.preprocessor = preprocessor
-
-        # Save features and target
         self.X = X
         self.y = y
 
-        # Save feature names after preprocessing
-        # self.feature_names = self.get_feature_names()
-
     def initialize_model(self, model_type: str, random_state: int):
         """
-        Initialize the machine learning model based on the specified type.
-
-        :param model_type: Type of model to train ('xgboost', 'random_forest', etc.).
-        :param random_state: Random state for reproducibility.
-        :return: Initialized machine learning model.
+        Initialize the pipeline with a CalibratedClassifierCV around the chosen base model.
         """
         model_type = model_type.lower()
         if model_type == "xgboost":
-            base_model = xgb.XGBClassifier(
+            # Create base XGB model
+            base_xgb = xgb.XGBClassifier(
                 eval_metric='logloss',
                 random_state=random_state
+            )
+            # Wrap it with CalibratedClassifierCV
+            calibrated_model = CalibratedClassifierCV(
+                base_estimator=base_xgb,
+                method='sigmoid',
+                cv=3
             )
         else:
             raise ValueError(f"Model type '{model_type}' is not supported.")
 
-        calibrated_model = CalibratedClassifierCV(estimator=base_model, method='sigmoid', cv=3)
-
-        # Create a pipeline that first preprocesses the data and then fits the calibrated model
+        # Build an overall pipeline with preprocessing + calibrator
         self.pipeline = Pipeline(steps=[
             ("preprocessor", self.preprocessor),
-            ("calibrated_classifier", calibrated_model)
+            ("classifier", calibrated_model)
         ])
 
     def train_model(self):
         """
-        Train the model.
+        Hyperparameter-tune the pipeline.
+        For XGBoost inside a CalibratedClassifierCV, reference
+        classifier__base_estimator__<param> for XGB's hyperparams.
         """
-        self.pipeline.fit(self.X, self.y)
-        print("Model training completed.")
+        if self.model_type == "xgboost":
+            # Note that we reference the XGB parameters through base_estimator
+            param_grid = {
+                "classifier__base_estimator__n_estimators": [50, 75, 100],
+                "classifier__base_estimator__max_depth": [2, 3],
+                "classifier__base_estimator__learning_rate": [0.05, 0.1],
+            }
+        else:
+            return  # Insert other models' grids if needed
+
+        print("Starting hyperparameter tuning on initial training data...")
+        grid_search = GridSearchCV(
+            estimator=self.pipeline,
+            param_grid=param_grid,
+            cv=6,
+            scoring='neg_log_loss',
+            n_jobs=-1,
+            verbose=1
+        )
+
+        grid_search.fit(self.X, self.y)
+        self.best_params = grid_search.best_params_
+        print("Best hyperparameters found:", grid_search.best_params_)
+
+        # Save the best estimator pipeline
+        self.pipeline = grid_search.best_estimator_
+
+        # The pipeline now includes the best hyperparameters
+        # in the XGB base_estimator (wrapped by CalibratedClassifierCV).
+        print("Hyperparameter tuning and calibration complete.\n")
 
     def perform_cross_validation(self, combined_df: pd.DataFrame, cv_folds: int = 5):
         """
-        Perform cross-validation to assess model performance.
-
-        :param combined_df: DataFrame containing features and target variables.
-        :param cv_folds: Number of cross-validation folds.
+        Optionally, you can run cross-validation on combined historical data
+        to assess performance.
         """
-        features = combined_df.drop(columns=["Home_Win", "Game_Date", "Game_PK"])
+        features = combined_df.drop(columns=["Home_Win", "Game_Date", "Game_PK"], errors='ignore')
         target = combined_df["Home_Win"]
 
-        # Define a pipeline consistent with LiveGamePredictor's preprocessing
         pipeline = self.pipeline
-
         print(f"Performing {cv_folds}-fold cross-validation...")
         cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=self.random_state)
         scores = cross_val_score(pipeline, features, target, cv=cv, scoring='roc_auc')
@@ -213,99 +261,116 @@ class Engine:
         print(f"Mean ROC-AUC: {scores.mean():.4f} | Std: {scores.std():.4f}")
 
     def generate_feature_vectors(self):
+        """
+        Pull new gamelogs, identify newly-finished games,
+        append them to the dataset, and re-train if needed.
+        """
         self.unlabeled_vector_df = self.data_pipeline.process_games()
-        new_finished_games = self.unlabeled_vector_df[self.unlabeled_vector_df['home_win'].isin([0, 1])]
+        new_finished_games = self.unlabeled_vector_df[
+            self.unlabeled_vector_df[self.target_column].isin([0, 1])
+        ]
         if not new_finished_games.empty:
             print(f"Found {len(new_finished_games)} new finished games.")
 
-            # Remove finished games from unlabeled_vector_df
+            # Remove those completed games from unlabeled
             self.unlabeled_vector_df = self.unlabeled_vector_df[
                 ~self.unlabeled_vector_df['Game_PK'].isin(new_finished_games['Game_PK'])
             ]
 
-            # Append new finished games to the dataset CSV file
-            # Load existing dataset
+            # Ensure correct datetime type
+            new_finished_games['Game_Date'] = pd.to_datetime(new_finished_games['Game_Date'], errors='coerce')
+
+            # Load the existing dataset again
             existing_data = self.load_dataset()
+            existing_data['Game_Date'] = pd.to_datetime(existing_data['Game_Date'], errors='coerce')
 
-            # Concatenate existing data with new finished games
+            # Concatenate old + new
             combined_data = pd.concat([existing_data, new_finished_games], ignore_index=True)
-
-            # Sort chronologically
+            combined_data['Game_Date'] = pd.to_datetime(combined_data['Game_Date'], errors='coerce')
             combined_data.sort_values(by='Game_Date', inplace=True)
 
-            # Save back to CSV
+            # Save updated file
             combined_data.to_csv(self.dataset_path, index=False)
             print("New finished games appended to the dataset.")
 
-            # Re-load and preprocess data
+            # Re-load and re-train
             self.data = self.load_dataset()
+            self.data['Game_Date'] = pd.to_datetime(self.data['Game_Date'], errors='coerce')
             self.preprocess_data()
-
-            # Re-train the model
             self.train_model()
             print("Model retrained with new data.")
 
-            # Sort unlabeled_vector_df for upcoming predictions
+        # Sort unlabeled upcoming data by date for consistency
         if self.unlabeled_vector_df is not None:
+            self.unlabeled_vector_df['Game_Date'] = pd.to_datetime(
+                self.unlabeled_vector_df['Game_Date'], errors='coerce'
+            )
             self.unlabeled_vector_df.sort_values(by='Game_Date', inplace=True)
 
     def predict_live_games(self):
         """
-        Predict the outcomes of upcoming games.
+        Predict the probabilities of Home_Win on upcoming games.
         """
         if self.unlabeled_vector_df is None or self.pipeline is None:
             print("No data to predict or model not trained.")
             return
 
-        # Prepare the data (unlabeled data)
-        X_live = self.unlabeled_vector_df.drop(columns=[self.target_column, "Game_Date", "Game_PK"],
-                                               errors='ignore')
+        # We remove target columns before prediction (since these are unlabeled in practice)
+        X_live = self.unlabeled_vector_df.drop(
+            columns=[self.target_column, "Game_Date", "Game_PK"], errors='ignore'
+        )
 
-        # Predict probabilities using the pipeline (which includes preprocessing)
-        probabilities = self.pipeline.predict_proba(X_live)[:, 1]  # Probability of Home_Win == 1
-
-        # Add the probabilities to the DataFrame
+        # Predict home-win probabilities
+        probabilities = self.pipeline.predict_proba(X_live)[:, 1]
         self.unlabeled_vector_df['Home_Win'] = probabilities
         self.unlabeled_vector_df.sort_values(by='Game_Date', inplace=True)
 
+        # Build a predictions_df with relevant columns
         self.predictions_df = self.unlabeled_vector_df[[
             'Game_PK', 'Game_Date', 'Home_Team_Abbr', 'Away_Team_Abbr',
             self.moneyline_columns[0], self.moneyline_columns[1],
             'home_odds_decimal', 'away_odds_decimal',
             'home_implied_prob', 'away_implied_prob',
-            'home_wager_percentage', 'home_wager_percentage'
+            'home_wager_percentage', 'away_wager_percentage',
             'Home_Win'
-        ]]
-        self.predictions_df.rename(columns={'Home_Win': 'Home_Win_Prob_Theo'})
+        ]].copy()
+
+        # Rename the 'Home_Win' column to clarify it's a probability
+        self.predictions_df.rename(columns={'Home_Win': 'Home_Win_Prob_Theo'}, inplace=True)
         self.predictions_df['Away_Win_Prob_Theo'] = 1 - self.predictions_df['Home_Win_Prob_Theo']
 
-        output_file = os.path.join(
-            self.live_data_folder,
-            "live_predictions.csv"  # Fixed filename
-        )
+        # Save predictions to disk
+        output_file = os.path.join(self.live_data_folder, "live_predictions.csv")
         os.makedirs(self.output_folder, exist_ok=True)
         self.predictions_df.to_csv(output_file, index=False)
         print(f"Updated {output_file}")
 
     def update_and_predict(self):
         """
-        Method to update data and make predictions. This replaces the previous callback mechanism.
+        Refresh data (both finished & upcoming) and produce new predictions.
         """
         print("Updating data and generating new predictions...")
-        # Update the data pipeline's date range
-        self.data_pipeline = DataPipeline(
-            datetime.date.today().strftime("%Y-%m-%d"),
-            (datetime.date.today() + datetime.timedelta(days=self.days_ahead)).strftime("%Y-%m-%d")
-        )
+
+        # You might optionally refresh self._current_time here if desired
+        # For a true live system, you'd do self._current_time = datetime.now()
+
+        start_date_str = self.get_current_time().strftime("%Y-%m-%d")
+        end_date_str = (self.get_current_time() + timedelta(days=self.days_ahead)).strftime("%Y-%m-%d")
+
+        # Recreate pipeline for upcoming data
+        self.data_pipeline = DataPipeline(start_date_str, end_date_str, version=2)
+
+        # Possibly see if new games are finished, update dataset, re-train
         self.generate_feature_vectors()
+
+        # Then predict outcomes for upcoming games
         self.predict_live_games()
 
     def get_predictions(self) -> Dict[int, Dict]:
         """
-        Return the meaningful data as a dictionary with Game_PK as keys.
+        Return predictions as a dictionary: { Game_PK: {...fields...}, ... }
         """
         if self.predictions_df is not None and not self.predictions_df.empty:
-            # Convert the DataFrame to a dictionary with Game_PK as keys
             predictions_dict = self.predictions_df.set_index('Game_PK').to_dict('index')
             return predictions_dict
         else:
@@ -314,7 +379,7 @@ class Engine:
 
     def run(self):
         """
-        Run the Engine by periodically updating data and making predictions.
+        Run the Engine by updating & predicting in a loop (daemon thread).
         """
         print("Starting Engine...")
 
@@ -323,14 +388,12 @@ class Engine:
                 self.update_and_predict()
                 time.sleep(self.update_interval)
 
-        # Start the periodic update in a separate thread
         update_thread = threading.Thread(target=periodic_update, daemon=True)
         update_thread.start()
 
         print(f"Engine is running. Updates every {self.update_interval} seconds. Press Ctrl+C to stop.")
         try:
             while True:
-                # Keep the main thread alive
                 time.sleep(1)
         except KeyboardInterrupt:
             print("\nEngine stopped by user.")

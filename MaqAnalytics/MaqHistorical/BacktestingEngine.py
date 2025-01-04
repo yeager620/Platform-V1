@@ -1,4 +1,5 @@
 import xgboost as xgb
+import optuna
 import pandas as pd
 import numpy as np
 import os
@@ -12,6 +13,7 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.model_selection import cross_val_score
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import (
@@ -46,8 +48,11 @@ class BacktestingEngine:
             random_state: int = 42,
     ):
         self.data = data.copy()
+
         self.target_column = target_column
+        self.run_diff_col = "Run_Diff"
         self.moneyline_columns = moneyline_columns
+
         self.model_type = model_type.lower()
         self.initial_train_size = initial_train_size
         self.kelly_fraction = kelly_fraction
@@ -189,9 +194,9 @@ class BacktestingEngine:
             }
         elif self.model_type == "xgboost":
             param_grid = {
-                "classifier__n_estimators": [10, 25, 50, 75],
-                "classifier__max_depth": [2, 3, 4],
-                "classifier__learning_rate": [0.1, 0.2, 0.3]
+                "classifier__n_estimators": [50, 75, 100],
+                "classifier__max_depth": [2, 3],
+                "classifier__learning_rate": [0.075, 0.1, 0.2]
             }
         elif self.model_type == "random_forest":
             param_grid = {
@@ -218,9 +223,9 @@ class BacktestingEngine:
         grid_search = GridSearchCV(
             estimator=self.pipeline,
             param_grid=param_grid,
-            cv=3,  # 3-fold cross-validation
+            cv=6,  # n-fold cross-validation
             scoring='neg_log_loss',
-            n_jobs=-1,
+            n_jobs=--1,
             verbose=1
         )
 
@@ -235,7 +240,7 @@ class BacktestingEngine:
 
         # Now wrap the best found classifier with CalibratedClassifierCV
         best_classifier = self.pipeline.named_steps['classifier']
-        calibrated_model = CalibratedClassifierCV(estimator=best_classifier, method='sigmoid', cv=3)
+        calibrated_model = CalibratedClassifierCV(estimator=best_classifier, method='sigmoid', cv=10, n_jobs=-1)
 
         # Rebuild pipeline with calibration
         self.pipeline = Pipeline(steps=[

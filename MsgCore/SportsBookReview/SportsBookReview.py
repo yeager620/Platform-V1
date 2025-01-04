@@ -9,11 +9,12 @@ from tqdm.asyncio import tqdm_asyncio
 
 
 class SportsbookReviewScraper:
-    def __init__(self, start_date, end_date):
+    def __init__(self, start_date, end_date, line_type="ml_full"):
         self.base_url = "https://www.sportsbookreview.com/betting-odds/mlb-baseball/"
         self.start_date = start_date
         self.end_date = end_date
         self.date_range = self.generate_date_range()
+        self.line_type = line_type
 
     def generate_date_range(self):
         start = datetime.strptime(self.start_date, "%Y-%m-%d")
@@ -33,7 +34,12 @@ class SportsbookReviewScraper:
             tuple: (date, html content) if successful, else (date, None).
         """
         formatted_date = date.strftime("%Y-%m-%d")
-        url = f"{self.base_url}?date={formatted_date}"
+        if self.line_type == "ml_full":
+            url = f"{self.base_url}?date={formatted_date}"
+        elif self.line_type == "ml_half":
+            url = f"{self.base_url}money-line/1st-half/?date={formatted_date}"
+        else:
+            url = f"{self.base_url}?date={formatted_date}"
         headers = {
             'User-Agent': (
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -73,7 +79,7 @@ class SportsbookReviewScraper:
         """
         pages = []
         connector = aiohttp.TCPConnector(limit=10)  # Limit concurrent connections
-        timeout = aiohttp.ClientTimeout(total=60)    # Total timeout for requests
+        timeout = aiohttp.ClientTimeout(total=60)   # Total timeout for requests
 
         async with ClientSession(connector=connector, timeout=timeout) as session:
             tasks = [self.fetch_page(session, date) for date in self.date_range]
@@ -95,9 +101,11 @@ class SportsbookReviewScraper:
         """
         if not html:
             return []  # Return empty list if no HTML content
+
         soup = BeautifulSoup(html, 'html.parser')
         games = soup.find_all('div', class_='GameRows_eventMarketGridContainer__GuplK')
         records = []
+
         for game in games:
             try:
                 game_time = game.find('span', class_='fs-9').text.strip()
@@ -113,10 +121,30 @@ class SportsbookReviewScraper:
                 team_1_wager = wager_percentages[0].text.strip() if len(wager_percentages) > 0 else None
                 team_2_wager = wager_percentages[1].text.strip() if len(wager_percentages) > 1 else None
 
+                # --- NEW PART: Extracting Opening Lines ---
+                # The opening line block is typically in the same "consensus" or adjacent div
+                # but with data-vertical-sbid='-1', for example:
+                # <div class="d-flex col-6 ... " data-vertical-sbid="-1">
+                opening_line_div = game.find('div', {
+                    'class': 'd-flex col-6 justify-content-end align-items-center overflow-hidden GameRows_consensusColumn__AOd1q undefined undefined',
+                    'data-vertical-sbid': '-1'
+                })
+                team_1_opening_line, team_2_opening_line = None, None
+                if opening_line_div:
+                    # We look for two lines under that block:
+                    opening_lines = opening_line_div.find_all('span', class_='fs-9 undefined')
+                    if len(opening_lines) >= 2:
+                        team_1_opening_line = opening_lines[0].get_text(strip=True)
+                        team_2_opening_line = opening_lines[1].get_text(strip=True)
+
                 sportsbook_data = game.find_all('div', class_='OddsCells_numbersContainer__6V_XO')
                 for sportsbook in sportsbook_data:
                     sportsbook_link = sportsbook.find('a')
-                    sportsbook_name = sportsbook_link['data-aatracker'].split(' - ')[-1].strip() if sportsbook_link else None
+                    sportsbook_name = (
+                        sportsbook_link['data-aatracker'].split(' - ')[-1].strip()
+                        if sportsbook_link and 'data-aatracker' in sportsbook_link.attrs
+                        else None
+                    )
                     odds_lines = sportsbook.find_all('div', class_='OddsCells_oddsNumber__u3rsp')
 
                     if len(odds_lines) >= 2:
@@ -132,6 +160,7 @@ class SportsbookReviewScraper:
                             'opponent': team_2,
                             'sportsbook': sportsbook_name,
                             'odds': team_1_odds,
+                            'opening_line': team_1_opening_line,     # <-- inserted
                             'wager_percentage': team_1_wager,
                             'game_time': game_time,
                             'game_url': game_url
@@ -145,14 +174,17 @@ class SportsbookReviewScraper:
                             'opponent': team_1,
                             'sportsbook': sportsbook_name,
                             'odds': team_2_odds,
+                            'opening_line': team_2_opening_line,     # <-- inserted
                             'wager_percentage': team_2_wager,
                             'game_time': game_time,
                             'game_url': game_url
                         }
                         records.append(record_team_2)
+
             except Exception as e:
                 print(f"Error parsing game data on {date.strftime('%Y-%m-%d')}: {e}")
                 continue
+
         return records
 
     def scrape(self):
@@ -176,4 +208,5 @@ class SportsbookReviewScraper:
         for date, html in date_html_list:
             records = self.parse_page(html, date)
             all_records.extend(records)
+
         return pd.DataFrame(all_records)
