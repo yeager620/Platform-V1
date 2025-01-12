@@ -381,6 +381,7 @@ class SavantVectorGenerator:
                 # pitching stats
                 if position_abb == 'P':
                     game_pitching = player_info.get('stats', {}).get('pitching', {})
+                    row['started_flag'] = 1 if game_pitching.get('gamesStarted', 0) > 0 else 0
                     for sk in PITCHING_STAT_MAP:
                         val = game_pitching.get(sk, 0)
                         row[f"P_{sk}"] = float(val) if str(val).replace('.', '', 1).isdigit() else 0.0

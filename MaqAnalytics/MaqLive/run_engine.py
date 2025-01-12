@@ -6,8 +6,8 @@ import pandas as pd
 
 def main():
     # Define paths and parameters
-    dataset_path = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/v1.2-game-vectors_2021-04-01_2024-10-30.csv"
-    target_column = "Home_Win"  # Replace with your actual target column name
+    dataset_path = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/v1.2.7-game-vectors-ml-half_2021-04-01_2024-10-30.csv"
+    target_column = "Home_Win_Half"
     moneyline_columns = ["home_odds", "away_odds"]  # Replace with your actual moneyline column names
 
     # to fix or mock the current time for testing:

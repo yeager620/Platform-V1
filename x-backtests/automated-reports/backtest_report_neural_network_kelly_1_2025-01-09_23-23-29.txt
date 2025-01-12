@@ -1,0 +1,63 @@
+Backtesting Report
+==================
+
+Total number of games in dataset: 5046
+Total number of days in dataset: 477
+Initial training size: 75.0%
+Best hyperparameters found: {'classifier__alpha': 0.001, 'classifier__hidden_layer_sizes': (64,), 'classifier__learning_rate_init': 0.0001, 'classifier__max_iter': 200}
+Daily model updates: False
+
+Kelly fraction used: 1.0 (Full Kelly)
+
+Backtest Evaluation Metrics:
+Total Profit: -9999.756625367963
+Return on Investment (ROI %): -99.99756625367962
+Total Bets: 124
+Total Wins: 72
+Win Rate (%): 58.06451612903226
+Final Bankroll: 0.24337463203797005
+T-Test Statistic: -1.4009631531407751
+T-Test p-value: 0.9180173198066497
+Wilcoxon Test Statistic: 3144.0
+Wilcoxon Test p-value: 0.6470830948790964
+Mann-Whitney U Statistic: 7068.0
+Mann-Whitney U p-value: 0.11075553895565016
+Model Brier Score: 0.21858927203917927
+Bookmaker Brier Score: 0.20988424787007848
+Model Log Loss: 0.627816604391517
+Bookmaker Log Loss: 0.6086289725989585
+Model AUC: 0.6653348347353779
+Bookmaker AUC: 0.741319467443863
+Diebold-Mariano Statistic: 2.416022692288265
+Diebold-Mariano p-value: 0.007845541710619908
+
+Model Accuracy Metrics:
+Accuracy: 0.659270998415214
+Precision: 0.6696165191740413
+Recall: 0.8787096774193548
+F1-Score: 0.7600446428571429
+ROC-AUC: 0.6653348347353779
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.62      0.31      0.41       487
+           1       0.67      0.88      0.76       775
+
+    accuracy                           0.66      1262
+   macro avg       0.64      0.59      0.59      1262
+weighted avg       0.65      0.66      0.63      1262
+
+Confusion Matrix:
+[[151 336]
+ [ 94 681]]
+
+Feature importances not available for the selected model.
+
+
+Additional Information:
+Model Type: neural_network
+Random State: 28
+Report Generated on: 2025-01-09_23-23-29
+
+Calibration plot saved as 'calibration_plot_2025-01-09_23-23-29.png' in the output folder.

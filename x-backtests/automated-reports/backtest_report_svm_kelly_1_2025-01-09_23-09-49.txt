@@ -1,0 +1,63 @@
+Backtesting Report
+==================
+
+Total number of games in dataset: 5046
+Total number of days in dataset: 477
+Initial training size: 75.0%
+Best hyperparameters found: {'classifier__C': 1, 'classifier__kernel': 'rbf'}
+Daily model updates: False
+
+Kelly fraction used: 1.0 (Full Kelly)
+
+Backtest Evaluation Metrics:
+Total Profit: -9747.94911399873
+Return on Investment (ROI %): -97.47949113998727
+Total Bets: 124
+Total Wins: 76
+Win Rate (%): 61.29032258064516
+Final Bankroll: 252.0508860012724
+T-Test Statistic: -0.9092385367879521
+T-Test p-value: 0.817393939279949
+Wilcoxon Test Statistic: 3275.0
+Wilcoxon Test p-value: 0.31158618079883377
+Mann-Whitney U Statistic: 7215.0
+Mann-Whitney U p-value: 0.009266895511583068
+Model Brier Score: 0.21631175521642412
+Bookmaker Brier Score: 0.20988424787007848
+Model Log Loss: 0.6215581069018399
+Bookmaker Log Loss: 0.6086289725989585
+Model AUC: 0.6649771477777041
+Bookmaker AUC: 0.741319467443863
+Diebold-Mariano Statistic: 2.004423598344369
+Diebold-Mariano p-value: 0.02251235177028099
+
+Model Accuracy Metrics:
+Accuracy: 0.6513470681458003
+Precision: 0.6587677725118484
+Recall: 0.896774193548387
+F1-Score: 0.7595628415300546
+ROC-AUC: 0.6649771477777041
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.61      0.26      0.37       487
+           1       0.66      0.90      0.76       775
+
+    accuracy                           0.65      1262
+   macro avg       0.64      0.58      0.56      1262
+weighted avg       0.64      0.65      0.61      1262
+
+Confusion Matrix:
+[[127 360]
+ [ 80 695]]
+
+Feature importances not available for the selected model.
+
+
+Additional Information:
+Model Type: svm
+Random State: 28
+Report Generated on: 2025-01-09_23-09-49
+
+Calibration plot saved as 'calibration_plot_2025-01-09_23-09-49.png' in the output folder.

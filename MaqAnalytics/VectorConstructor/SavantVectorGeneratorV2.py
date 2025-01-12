@@ -100,6 +100,7 @@ PITCHING_STAT_MAP = {
     # "hitsPer9Inn": "P_H9",
     # "runsScoredPer9": "P_R9",
     # "homeRunsPer9": "P_HR9",
+    # "homeRunsPer9": "P_HR9",
     "inheritedRunners": "P_IR",
     "inheritedRunnersScored": "P_IRS",
     "catchersInterference": "P_CI",
@@ -202,6 +203,23 @@ def get_current_date():
         str: Current date as a string.
     """
     return datetime.now().strftime("%m/%d/%Y")
+
+def safe_add(a, b):
+    """
+    Safe addition that returns None if either 'a' or 'b' is None.
+    """
+    if a is None or b is None:
+        return None  # or return 0 if you prefer a numeric default
+    return a + b
+
+def safe_mul(a, b):
+    """
+    Safe multiplication that returns None if either 'a' or 'b' is None.
+    """
+    if a is None or b is None:
+        return None  # or return 0, if ignoring None is desired
+    return a * b
+
 
 
 class SavantVectorGeneratorV2:
@@ -335,7 +353,12 @@ class SavantVectorGeneratorV2:
             for stat_key in stat_map.keys():
                 # Retrieve the stats, defaulting to 0 if not found
                 season_stat = season_stats.get(stat_key, 0)
-                game_stat = game_stats.get(stat_key, 0)
+                game_stat = game_stats.get(stat_key, -1)
+
+                # Prevent lookahead bias if statistic is only available in season cumulative form
+                if game_stat == -1:
+                    adjusted_stats[stat_key] = None
+                    continue
 
                 # Convert to numeric values, defaulting to 0 for invalid entries
                 try:
@@ -522,7 +545,7 @@ class SavantVectorGeneratorV2:
         has_dh = False
         for player_id in starting_batters:
             player_info = self.get_player_info(player_id, game_json, team_type)
-            if player_info is None:
+            if not player_info:
                 continue
             batting_order_map[player_id] = int(player_info.get('battingOrder', -100)) // 100
             print(f"batting order for player {player_id} is {batting_order_map[player_id]}")
@@ -535,7 +558,7 @@ class SavantVectorGeneratorV2:
 
         for player_id in starting_lineup:
             player_info = self.get_player_info(player_id, game_json, team_type)
-            if player_info is None:
+            if not player_info:
                 print(f"Player info not found for player_id {player_id} in team {team_type}")
                 continue
 
@@ -582,11 +605,11 @@ class SavantVectorGeneratorV2:
                     if position_abbr in ['1B', '2B', '3B', 'SS']:
                         num_infielders += 1
                         for stat in FIELDING_STAT_MAP[position_abbr].keys():
-                            aggregated_stats[f"F_IF_{stat}"] += player_stats.get(f"F_{stat}", 0)
+                            aggregated_stats[f"F_IF_{stat}"] = safe_add(aggregated_stats[f"F_IF_{stat}"], player_stats.get(f"F_{stat}", 0))
                     if position_abbr in ['LF', 'CF', 'RF']:
                         num_outfielders += 1
                         for stat in FIELDING_STAT_MAP[position_abbr].keys():
-                            aggregated_stats[f"F_OF_{stat}"] += player_stats.get(f"F_{stat}", 0)
+                            aggregated_stats[f"F_OF_{stat}"] = safe_add(aggregated_stats[f"F_OF_{stat}"], player_stats.get(f"F_{stat}", 0))
                 else:
                     if position_abbr != 'DH':  # DH doesn't have fielding stats
                         print(f"Unrecognized position {position_abbr} for player_id {player_id}")
@@ -595,15 +618,16 @@ class SavantVectorGeneratorV2:
             if is_pitcher:
                 num_pitchers += 1
                 for stat in PITCHING_STAT_MAP.keys():
-                    aggregated_stats[f"P_{stat}"] += player_stats.get(f"P_{stat}", 0)
+                    aggregated_stats[f"P_{stat}"] = safe_add(aggregated_stats[f"P_{stat}"], player_stats.get(f"P_{stat}", 0))
 
 
         num_subs = 0
         total_sub_innings_pitched = 0
+        total_relief_games_pitched = 0
 
         for player_id in bullpen:
             player_info = self.get_player_info(player_id, game_json, team_type)
-            if player_info is None:
+            if not player_info:
                 print(f"Player info not found for bullpen pitcher player_id {player_id} in team {team_type}")
                 continue
             num_subs += 1
@@ -616,17 +640,32 @@ class SavantVectorGeneratorV2:
                 is_home=(team_type == 'home')
             )
             try:
+
+                relief_games_pitched = player_stats.get(f"P_gamesPlayed", 0) - player_stats.get(f"P_gamesStarted", 0)
+
+                if relief_games_pitched < player_stats.get(f"P_gamesPlayed", 0) / 2:
+                    continue
+
                 season_innings_pitched = float(
                     player_info.get('seasonStats', {}).get('pitching', {}).get('inningsPitched', 0))
                 game_innings_pitched = float(player_info.get('stats', {}).get('pitching', {}).get('inningsPitched', 0))
                 sub_innings_pitched = season_innings_pitched - game_innings_pitched
+
+                total_relief_games_pitched += relief_games_pitched
                 total_sub_innings_pitched += sub_innings_pitched
+
+                if relief_games_pitched < player_stats.get(f"P_gamesPlayed", 0) / 2:
+                    continue
+
             except (ValueError, TypeError):
                 sub_innings_pitched = 0  # Fallback for invalid innings values
+                relief_games_pitched = 0
 
             for stat in PITCHING_STAT_MAP.keys():
                 # SP: Substitution Pitcher
-                aggregated_stats[f"SP_{stat}"] += player_stats.get(f"P_{stat}", 0) * sub_innings_pitched
+                if player_stats.get(f"P_{stat}", 0) is None:
+                    continue
+                aggregated_stats[f"SP_{stat}"] += player_stats.get(f"P_{stat}", 0) * relief_games_pitched * sub_innings_pitched
 
         '''
         num_bench = 0
@@ -703,9 +742,9 @@ class SavantVectorGeneratorV2:
                 aggregated_stats[f"B{slot}_{stat}"] = player_stats.get(f"B_{stat}", 0)
 
         # Normalize Bullpen Pitching Stats
-        if num_subs > 0 and total_sub_innings_pitched > 0:
+        if num_subs > 0 and total_relief_games_pitched > 0:
             for stat in PITCHING_STAT_MAP.keys():
-                aggregated_stats[f"SP_{stat}"] /= total_sub_innings_pitched
+                aggregated_stats[f"SP_{stat}"] /= (total_relief_games_pitched * total_sub_innings_pitched)
 
         '''
         if num_bench > 0 and total_bench_at_bats > 0:
@@ -920,6 +959,10 @@ class SavantVectorGeneratorV2:
         # Create a mapping from gamePk to home team win (1) or loss (0)
         game_outcome = {}
         run_diffs = {}
+
+        half_outcome = {}
+        half_run_diff = {}
+
         for game_json in self.gamelogs:
             game_pk = game_json['scoreboard']['gamePk']
             try:
@@ -931,6 +974,15 @@ class SavantVectorGeneratorV2:
                 game_outcome[game_pk] = home_win
                 run_diffs[game_pk] = home_runs - away_runs
 
+                half_runs_home = 0
+                half_runs_away = 0
+                for inning in game_json['scoreboard']['linescore']['innings'][:5]:
+                    half_runs_home += inning['home']['runs']
+                    half_runs_away += inning['away']['runs']
+
+                half_outcome[game_pk] = 1 if half_runs_home >= half_runs_away else 0
+                half_run_diff[game_pk] = half_runs_home - half_runs_away
+
             except Exception as e:
                 print(f"Error processing game_pk {game_pk}: {e}")
                 game_outcome[game_pk] = None  # Default to None if error occurs
@@ -938,6 +990,9 @@ class SavantVectorGeneratorV2:
         # Map the 'Game_PK' column to 'Home_Win' using the game_outcome dictionary
         retrosheet_df['Home_Win'] = retrosheet_df['Game_PK'].map(game_outcome).fillna(0).astype(int)
         retrosheet_df['Run_Diff'] = retrosheet_df['Game_PK'].map(run_diffs).fillna(0).astype(int)
+
+        retrosheet_df['Home_Win_Half'] = retrosheet_df['Game_PK'].map(half_outcome).fillna(0).astype(int)
+        retrosheet_df['Run_Diff_Half'] = retrosheet_df['Game_PK'].map(half_run_diff).fillna(0).astype(int)
 
         return retrosheet_df
 
@@ -956,7 +1011,7 @@ class SavantVectorGeneratorV2:
         for team_type, lineup in [('home', home_lineup), ('away', away_lineup)]:
             for player_id in lineup:
                 player_info = self.get_player_info(player_id, game_json, team_type)
-                if player_info is None:
+                if not player_info:
                     continue  # Skip if player not found
 
                 # Extract current game stats
@@ -967,7 +1022,7 @@ class SavantVectorGeneratorV2:
 
                 # Update batting stats
                 for key in BATTING_STAT_MAP.keys():
-                    cumulative_player_stats[player_id][key] += batting_stats.get(key, 0)
+                    cumulative_player_stats[player_id][key] = safe_add(cumulative_player_stats[player_id][key], batting_stats.get(key, 0))
 
                 # Update pitching stats
                 for key in PITCHING_STAT_MAP.keys():
@@ -1043,7 +1098,7 @@ class SavantVectorGeneratorV2:
             if info.get('person', {}).get('id') == player_id:
                 return info
         print('player stats not found')
-        return None
+        return {}
 
     @staticmethod
     def has_cumulative_stats(player_cumulative):

@@ -4,6 +4,7 @@ import datetime
 from datetime import datetime, timedelta
 
 import aiohttp
+import numpy as np
 import requests
 import pandas as pd
 from collections import defaultdict
@@ -224,189 +225,76 @@ class SavantVectorGeneratorV3:
         )
         self.base_gamelog_url = "https://baseballsavant.mlb.com/gf?game_pk={game_pk}"
         self.gamelogs = self.get_unique_game_jsons()
-        self.batter_data = ""
-        self.pitcher_data = ""
+        self.batter_data = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-PlayerStatLogs/batters_2021_2024.csv"
+        self.pitcher_data = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-PlayerStatLogs/pitchers_2021_2024.csv"
 
-    def reconstruct_player_stats(self, game_id, game_json, player_info, is_home, is_pitcher=False, live=False):
+    def reconstruct_player_stats(self, game_id, game_json, player_info, is_home, is_pitcher=False, half_life=5):
         """
-        Reconstructs a statistics dictionary for a single player based on season stats.
+        Reconstructs a statistics dictionary for a single player using half-life weighted aggregation.
 
         Parameters:
             game_id (str): Unique identifier for the game.
             game_json (dict): JSON data for the game.
             player_info (dict): Player information from the JSON.
             is_home (bool): Flag indicating if the player is on the home team.
-            is_pitcher (bool): Indicated player is a pitcher
-            live (bool): Indicates live prediction
+            is_pitcher (bool): Indicates if the player is a pitcher.
+            half_life (int): The number of games after which weights decay to 50%.
 
         Returns:
-            dict: A dictionary representing the Retrosheet statistics with keys as stat names.
+            dict: A dictionary representing the statistics for the player up to the game date.
         """
-        # print(f"Reconstructing stats for player: {player_info.get('person', {}).get('id', 'Unknown')}")
-        # print(f"Season stats: {player_info.get('seasonStats', {})}")
-        # print(f"This game stats: {player_info.get('stats', {})}")
-        # Initialize a dictionary to hold all stats
         stats_dict = {}
 
-        position_abb = player_info.get('position', {}).get('abbreviation', 'None')
-
         # Basic Fields
+        position_abb = player_info.get('position', {}).get('abbreviation', 'None')
         stats_dict['game_id'] = game_id
         game_date = game_json.get('gameDate', '')
         try:
-            # Convert from "MM/DD/YYYY" to "YYYY-MM-DD"
             parsed_date = datetime.strptime(game_date, "%m/%d/%Y").strftime('%Y-%m-%d')
-        except:
-            parsed_date = '1970-01-01'  # Default date if parsing fails
+        except ValueError:
+            parsed_date = '1970-01-01'  # Default if parsing fails
         stats_dict['date'] = parsed_date
         stats_dict['appearance_date'] = parsed_date
         stats_dict['team_id'] = player_info.get('parentTeamId', 0)
         stats_dict['player_id'] = player_info.get('person', {}).get('id', 0)
-        stats_dict['batting_order'] = 0  # Placeholder
-        stats_dict['batting_order_sequence'] = 0  # Placeholder
         stats_dict['home_flag'] = 1 if is_home else 0
 
         # Opponent ID
         home_team_id = game_json['boxscore']['teams']['home']['team']['id']
         away_team_id = game_json['boxscore']['teams']['away']['team']['id']
-        opponent_id = away_team_id if is_home else home_team_id
-        stats_dict['opponent_id'] = opponent_id
+        stats_dict['opponent_id'] = away_team_id if is_home else home_team_id
 
         # Park ID
         stats_dict['park_id'] = game_json.get('park', {}).get('id', 0)
 
-        # Helper function to adjust stats
-        def get_adjusted_stats(stat_map, season_stats, game_stats):
-            """
-            Adjusts cumulative stats by subtracting game stats from season stats.
-
-            Parameters:
-                stat_map (dict): Mapping of stat keys to their field names.
-                season_stats (dict): Season-level statistics for the player.
-                game_stats (dict): Game-level statistics for the player.
-
-            Returns:
-                dict: Adjusted statistics.
-            """
-            adjusted_stats = {}
-            for stat_key in stat_map.keys():
-                # Retrieve the stats, defaulting to 0 if not found
-                season_stat = season_stats.get(stat_key, 0)
-                game_stat = game_stats.get(stat_key, 0)
-
-                # Convert to numeric values, defaulting to 0 for invalid entries
-                try:
-                    season_stat = float(season_stat)
-                except (ValueError, TypeError):
-                    season_stat = 0
-
-                try:
-                    game_stat = float(game_stat)
-                except (ValueError, TypeError):
-                    game_stat = 0
-
-                # Perform subtraction
-                adjusted_stats[stat_key] = season_stat - game_stat
-
-            return adjusted_stats
-
-        # Batting Stats
-        season_batting = player_info.get('seasonStats', {}).get('batting', {})
-        game_batting = player_info.get('stats', {}).get('batting', {})
-        adjusted_batting_stats = get_adjusted_stats(BATTING_STAT_MAP, season_batting, game_batting)
-
-        # Populate Batting Stats
-        for stat_key, retrosheet_field in BATTING_STAT_MAP.items():
-            value = adjusted_batting_stats.get(stat_key, 0)
-            stats_dict[f"B_{stat_key}"] = value
-
-        if position_abb == 'P':
-            # Pitching Stats
-            season_pitching = player_info.get('seasonStats', {}).get('pitching', {})
-            game_pitching = player_info.get('stats', {}).get('pitching', {})
-            adjusted_pitching_stats = get_adjusted_stats(PITCHING_STAT_MAP, season_pitching, game_pitching)
-
-            # Populate Pitching Stats
-            for stat_key, retrosheet_field in PITCHING_STAT_MAP.items():
-                value = adjusted_pitching_stats.get(stat_key, 0)
-                # Special handling for 'inningsPitched' -> 'P_OUT'
-                stats_dict[f"P_{stat_key}"] = value
-
-        # Fielding Stats
-        position_abbr = player_info.get('position', {}).get('abbreviation', '').upper()
-        season_fielding = player_info.get('seasonStats', {}).get('fielding', {})
-        game_fielding = player_info.get('stats', {}).get('fielding', {})
-        fielding_map = FIELDING_STAT_MAP.get(position_abbr, {})
-        adjusted_fielding_stats = get_adjusted_stats(fielding_map, season_fielding, game_fielding)
-        # Populate Fielding Stats
-        for stat_key, retrosheet_field in fielding_map.items():
-            value = adjusted_fielding_stats.get(stat_key, 0)
-            stats_dict[f"F_{stat_key}"] = value
-
-        # Normalize stats by games played to get per-game averages
-        if position_abb == 'P':
-            try:
-                games_played = int(player_info.get('seasonStats', {}).get('pitching', {}).get('gamesPlayed', 1)) - 1
-            except (ValueError, TypeError):
-                games_played = 1  # Fallback to avoid division by zero or invalid value
-
-            try:
-                season_innings_pitched = float(
-                    player_info.get('seasonStats', {}).get('pitching', {}).get('inningsPitched', 0))
-                game_innings_pitched = float(player_info.get('stats', {}).get('pitching', {}).get('inningsPitched', 0))
-                innings_pitched = season_innings_pitched - game_innings_pitched
-            except (ValueError, TypeError):
-                innings_pitched = 0  # Fallback for invalid innings values
+        # Load player data
+        if is_pitcher:
+            data_source = pd.read_csv(self.pitcher_data)
+            stat_map = PITCHING_STAT_MAP
         else:
-            try:
-                games_played = int(player_info.get('seasonStats', {}).get('batting', {}).get('gamesPlayed', 1)) - 1
-            except (ValueError, TypeError):
-                games_played = 1  # Fallback to avoid division by zero or invalid value
+            data_source = pd.read_csv(self.batter_data)
+            stat_map = BATTING_STAT_MAP
 
-            innings_pitched = 0  # Not applicable for non-pitchers
+        player_data = data_source[
+            (data_source['player_id'] == stats_dict['player_id']) &
+            (data_source['date'] < parsed_date)
+            ].sort_values(by='date', ascending=False)
 
-        if games_played <= 0:
-            print(
-                f"Warning (gamePk {game_id}): gamesPlayed is {games_played} for player {stats_dict['player_id']}. Defaulting to 1.")
-            games_played = 1  # Avoid division by zero
+        if player_data.empty:
+            logging.warning(
+                f"No data found for player {stats_dict['player_id']} before {parsed_date}. Returning Nones.")
+            return {stat: None for stat in stat_map.values()}
 
-        if innings_pitched <= 0:
-            print(
-                f"Warning (gamePk {game_id}): inningsPitched is {innings_pitched} for player {stats_dict['player_id']}. Defaulting to 1.")
-            innings_pitched = 1  # Avoid division by zero
+        # Compute weights using half-life
+        weights = np.exp(-np.log(2) * np.arange(len(player_data)) / half_life)
+        weights /= weights.sum()  # Normalize weights to sum to 1
 
-        # Normalize Batting Stats
-        '''
-        for stat_key in BATTING_STAT_MAP.keys():
-            if stat_key != "gamesPlayed":
-                stats_dict[f"B_{stat_key}"] /= games_played
-
-        if position_abb == 'P':
-            # Normalize Pitching Stats
-            for stat_key, mapped_field in PITCHING_STAT_MAP.items():
-                if stat_key in {
-                    "groundOuts", "airOuts", "runs", "earnedRuns", "hits", "doubles",
-                    "triples", "homeRuns", "strikeOuts", "baseOnBalls", "intentionalWalks",
-                    "hitByPitch", "wildPitches", "balks", "battersFaced", "numberOfPitches",
-                    "stolenBases", "caughtStealing", "outs", "pitchesThrown", "balls", "strikes",
-                    "hitBatsmen", "atBats", "pickoffs", "sacBunts", "sacFlies", "catchersInterference",
-                    "inheritedRunnersScored", "rbi", "passedBall"
-                }:
-                    stats_dict[f"P_{stat_key}"] /= innings_pitched
-                elif stat_key in {
-                    "gamesPlayed", "gamesStarted", "wins", "losses", "saves",
-                    "saveOpportunities", "completeGames", "shutouts", "holds",
-                    "blownSaves", "inheritedRunners", "inheritedRunnersScored", "gamesFinished"
-                }:
-                    stats_dict[f"P_{stat_key}"] /= games_played
-                else:
-                    # Skip or leave already normalized metrics as-is (e.g., ERA, WHIP)
-                    stats_dict[f"P_{stat_key}"] = stats_dict.get(f"P_{stat_key}", 0)
-
-        # Normalize Fielding Stats
-        for stat_key in fielding_map.keys():
-            stats_dict[f"F_{stat_key}"] /= games_played
-        '''
+        # Aggregate stats using weighted average
+        for stat_key, stat_column in stat_map.items():
+            if stat_key in player_data.columns:
+                stats_dict[stat_column] = np.dot(weights, player_data[stat_key].fillna(0))
+            else:
+                stats_dict[stat_column] = None  # Default if stat not available
 
         return stats_dict
 

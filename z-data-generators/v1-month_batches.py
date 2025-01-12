@@ -52,7 +52,7 @@ def main():
 
     # Define the output directory and final CSV path
     output_directory = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/"
-    final_csv_path = os.path.join(output_directory, f"v1.2.6-game_vectors_{overall_start_date}_{overall_end_date}.csv")
+    final_csv_path = os.path.join(output_directory, f"v1.2.8-game_vectors-{overall_start_date}_{overall_end_date}.csv")
     os.makedirs(output_directory, exist_ok=True)
 
     # Generate month-long intervals
@@ -60,7 +60,7 @@ def main():
     print(f"Total intervals to process: {len(intervals)}")
 
     # Define the number of parallel workers (adjust based on your system)
-    max_workers = min(8, os.cpu_count() or 1)
+    max_workers = os.cpu_count()
 
     # List to hold all DataFrames
     all_dataframes = []

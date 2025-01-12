@@ -1,0 +1,83 @@
+Backtesting Report
+==================
+
+Total number of games in dataset: 5046
+Total number of days in dataset: 477
+Initial training size: 75.0%
+Best hyperparameters found: {'classifier__learning_rate': 0.05, 'classifier__max_depth': 3, 'classifier__n_estimators': 50}
+Daily model updates: False
+
+Kelly fraction used: 1 (Full Kelly)
+
+Backtest Evaluation Metrics:
+Total Profit: 5257734069734.335
+Return on Investment (ROI %): 52577340697.34335
+Total Bets: 124
+Total Wins: 109
+Win Rate (%): 87.90322580645162
+Final Bankroll: 5257734079734.335
+T-Test Statistic: 2.556855402892502
+T-Test p-value: 0.005894153152434853
+Wilcoxon Test Statistic: 6848.0
+Wilcoxon Test p-value: 9.266478509487325e-15
+Mann-Whitney U Statistic: 13407.0
+Mann-Whitney U p-value: 2.240803869589106e-29
+Model Brier Score: 0.18870056882378952
+Bookmaker Brier Score: 0.20988424787007848
+Model Log Loss: 0.5564745860503395
+Bookmaker Log Loss: 0.6086289725989585
+Model AUC: 0.7661681128701066
+Bookmaker AUC: 0.741319467443863
+Diebold-Mariano Statistic: -7.080155171134467
+Diebold-Mariano p-value: 0.99999999999928
+
+Model Accuracy Metrics:
+Accuracy: 0.7155309033280507
+Precision: 0.7275711159737418
+Recall: 0.8580645161290322
+F1-Score: 0.7874481941977501
+ROC-AUC: 0.7661681128701066
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.68      0.49      0.57       487
+           1       0.73      0.86      0.79       775
+
+    accuracy                           0.72      1262
+   macro avg       0.71      0.67      0.68      1262
+weighted avg       0.71      0.72      0.70      1262
+
+Confusion Matrix:
+[[238 249]
+ [110 665]]
+
+Top 20 Feature Importances:
+                                               Feature  Importance
+                           num__knn__home_implied_prob    0.107856
+                   num__knn__home_opening_implied_prob    0.024967
+                   num__knn__away_opening_odds_decimal    0.024661
+                           num__knn__home_odds_decimal    0.023687
+                           num__knn__away_odds_decimal    0.023353
+                                         num__knn__vig    0.021184
+                   num__knn__home_opening_odds_decimal    0.020653
+                         num__knn__Away_B4_stolenBases    0.014474
+                       num__knn__home_wager_percentage    0.014073
+                      num__knn__Away_P_numberOfPitches    0.013096
+                          num__knn__Home_B8_strikeOuts    0.011757
+num__indicator__missingindicator_home_wager_percentage    0.011593
+                     num__knn__Away_P_inheritedRunners    0.009525
+                          num__knn__Away_B9_groundOuts    0.009361
+                    num__knn__Home_B9_plateAppearances    0.009280
+                                num__knn__Away_B3_runs    0.009067
+                       num__knn__away_wager_percentage    0.008925
+                          num__knn__Home_B7_hitByPitch    0.008846
+                         num__knn__Home_B5_baseOnBalls    0.008632
+                      num__knn__Home_B8_caughtStealing    0.008375
+
+Additional Information:
+Model Type: xgboost
+Random State: 28
+Report Generated on: 2025-01-09_12-13-54
+
+Calibration plot saved as 'calibration_plot_2025-01-09_12-13-54.png' in the output folder.

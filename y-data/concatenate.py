@@ -6,7 +6,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
 def main():
-    final_csv_path = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/v1.2.6-game-vectors_2021-04-01_2024-10-30.csv"
+    final_csv_path = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/v1.2.7-game-vectors-ml-half_2021-04-01_2024-10-30.csv"
 
     # Define the output directory and final CSV path
     # output_directory = "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/"
@@ -14,8 +14,8 @@ def main():
 
     # List to hold all csv paths
     all_csv_paths = [
-        "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/v1.2.6-game_vectors_2021-04-01_2022-12-31.csv",
-        "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/v1.2.6-game_vectors_2023-04-01_2024-12-31.csv"]
+        "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/v1.2.6-game_vectors_ml_half_2021-04-01_2022-12-31.csv",
+        "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/v1.2.6-game_vectors_ml_half_2023-04-01_2024-12-31.csv"]
 
     for path in all_csv_paths:
         df = pd.read_csv(path)

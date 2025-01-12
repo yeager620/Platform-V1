@@ -10,13 +10,13 @@ class TestBacktestingEngineXGBoost(unittest.TestCase):
         """
         # Read the cleaned mock data into a DataFrame
         self.mock_data = pd.read_csv(
-            "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/v1.2.6-game-vectors_2021-04-01_2024-10-30.csv")
+            "/Users/yeager/Desktop/Maquoketa-Platform-V1/y-data/v1.2-full/v1.2.7-game-vectors-ml-half_2021-04-01_2024-10-30.csv")
 
         # Ensure 'park_id' is treated as categorical by converting it to string
         self.mock_data['park_id'] = self.mock_data['park_id'].astype(str)
 
         # Define target and moneyline columns
-        self.target_column = 'Home_Win'
+        self.target_column = 'Home_Win_Half'
         self.moneyline_columns = ['home_odds', 'away_odds']
 
     def test_xgboost_model_backtest(self):
@@ -29,9 +29,10 @@ class TestBacktestingEngineXGBoost(unittest.TestCase):
                 target_column=self.target_column,
                 moneyline_columns=self.moneyline_columns,
                 model_type='xgboost',
-                initial_train_size=0.69,
-                update_model=False,
-                random_state=28
+                initial_train_size=0.75,
+                update_model=True,
+                random_state=28,
+                kelly_fraction=1
             )
 
             # Run the full pipeline with an initial bankroll of $10,000

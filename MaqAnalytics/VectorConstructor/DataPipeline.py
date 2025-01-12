@@ -7,6 +7,7 @@ from MsgCore.SportsBookReview.SportsBookReview import SportsbookReviewScraper
 from .OddsMatchingEngine import OddsMatchingEngine
 from .SavantVectorGenerator import SavantVectorGenerator
 from .SavantVectorGeneratorV2 import SavantVectorGeneratorV2
+from .SavantVectorGeneratorV3 import SavantVectorGeneratorV3
 
 # Configure logging to help debug and monitor the scraping process
 logging.basicConfig(
@@ -38,6 +39,8 @@ class DataPipeline:
             self.savant_converter = SavantVectorGenerator(start_date=start_date, end_date=end_date)
         elif version == 2:
             self.savant_converter = SavantVectorGeneratorV2(start_date=start_date, end_date=end_date)
+        elif version == 3:
+            self.savant_converter = SavantVectorGeneratorV3(start_date=start_date, end_date=end_date)
         else:
             self.savant_converter = SavantVectorGenerator(start_date=start_date, end_date=end_date)
 

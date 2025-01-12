@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional, Callable
 
 import pandas as pd
 import xgboost as xgb
+from sklearn.impute import KNNImputer, MissingIndicator
 from sklearn.model_selection import StratifiedKFold, cross_val_score, GridSearchCV
 from transformers import Pipeline
 from sklearn.linear_model import LogisticRegression
@@ -16,7 +17,7 @@ from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import Pipeline, FeatureUnion
 
 from MaqAnalytics.VectorConstructor.DataPipeline import DataPipeline
 
@@ -151,28 +152,30 @@ class Engine:
         X = self.data.drop(columns=[self.target_column, "Game_Date", "Game_PK"], errors='ignore')
         y = self.data[self.target_column]
 
-        # Identify numerical and categorical columns
-        numerical_cols = [
-            col for col in X.select_dtypes(include=["int64", "float64"]).columns
-            if col not in self.moneyline_columns
-        ]
-        categorical_cols = [
-            col for col in X.select_dtypes(include=["object", "category", "bool"]).columns
-            if col not in self.moneyline_columns
-        ]
+        numeric_cols = self.X.select_dtypes(include=["int64", "float64"]).columns.tolist()
+        numeric_cols = [c for c in numeric_cols if c not in self.moneyline_columns]
 
-        # Build the transformers
-        numerical_transformer = Pipeline(steps=[
+        categorical_cols = self.X.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
+        categorical_cols = [c for c in categorical_cols if c not in self.moneyline_columns]
+
+        # Define preprocessing steps
+        numeric_transformer = Pipeline(steps=[
+            ("union", FeatureUnion([
+                ("knn", Pipeline([
+                    ("imputer", KNNImputer(n_neighbors=5)),
+                ])),
+                ("indicator", MissingIndicator(features="missing-only"))
+            ])),
             ("scaler", StandardScaler())
         ])
+
         categorical_transformer = Pipeline(steps=[
             ("onehot", OneHotEncoder(handle_unknown="ignore"))
         ])
 
-        # Combine them in a ColumnTransformer
         preprocessor = ColumnTransformer(
             transformers=[
-                ("num", numerical_transformer, numerical_cols),
+                ("num", numeric_transformer, numeric_cols),
                 ("cat", categorical_transformer, categorical_cols),
             ]
         )
@@ -216,9 +219,9 @@ class Engine:
         if self.model_type == "xgboost":
             # Note that we reference the XGB parameters through base_estimator
             param_grid = {
-                "classifier__base_estimator__n_estimators": [50, 75, 100],
-                "classifier__base_estimator__max_depth": [2, 3],
-                "classifier__base_estimator__learning_rate": [0.05, 0.1],
+                "classifier__base_estimator__n_estimators": [50],
+                "classifier__base_estimator__max_depth": [3],
+                "classifier__base_estimator__learning_rate": [0.05],
             }
         else:
             return  # Insert other models' grids if needed
@@ -249,8 +252,8 @@ class Engine:
         Optionally, you can run cross-validation on combined historical data
         to assess performance.
         """
-        features = combined_df.drop(columns=["Home_Win", "Game_Date", "Game_PK"], errors='ignore')
-        target = combined_df["Home_Win"]
+        features = combined_df.drop(columns=["Home_Win_Half", "Game_Date", "Game_PK", "Run_Diff", "Home_Win"], errors='ignore')
+        target = combined_df["Home_Win_Half"]
 
         pipeline = self.pipeline
         print(f"Performing {cv_folds}-fold cross-validation...")
@@ -317,7 +320,7 @@ class Engine:
 
         # We remove target columns before prediction (since these are unlabeled in practice)
         X_live = self.unlabeled_vector_df.drop(
-            columns=[self.target_column, "Game_Date", "Game_PK"], errors='ignore'
+            columns=[self.target_column, "Game_Date", "Game_PK", "Home_Win", "Run_Diff"], errors='ignore'
         )
 
         # Predict home-win probabilities
