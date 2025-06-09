@@ -3,7 +3,7 @@ Data Analytics and Betting Engine
 
 ## Note for anyone looking through this repo:
 
-This repo is **mostly** garbage and hasnt really been updated since 1/??/25. AFAIK any strategy that can be directly plucked from this repo is either not profitable (due to lookahead bias or the like) or not feasible.
+This repo is *mostly* garbage and hasnt really been updated since 1/??/25. AFAIK any strategy that can be directly plucked from this repo is either not profitable (due to lookahead bias or the like) or not feasible.
 
 ### However;
 
