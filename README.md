@@ -1,2 +1,2 @@
-# Maquoketa-Platform-V1
-Pre-Alpha Development of Maquoketa Flagship Data Analytics and Betting Engine
+# Platform-V1
+(pre-alpha) Data Analytics and Betting Engine
