@@ -1,5 +1,10 @@
 # [DEPRECATED] Platform-V1
 Data Analytics, Backtesting, and Live Theo Odds
 
-This repo is *mostly* garbage and hasnt really been updated since 1/??/25. AFAIK any strategy that can be directly plucked from this repo is either not profitable (due to lookahead bias or the like) or not feasible. That being said there is some great data pipelining infrastructure here.
+Old version of repo used for researching and testing new models for predicting MLB games.
 
+Some Components:
+- GUI for visualizing live lines and model probabilities of upcoming games
+- Data pipelining infra for pulling raw historical stats, lineup reconstruction, feature engineering / feature vector construction, training / testing set construction
+- Backtesting engine
+- Storage of a few historical datasets of labeled feature vectors, most in this repo have a lot of sneaky lookahead bias
